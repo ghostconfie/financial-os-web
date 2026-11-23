@@ -1,4 +1,4 @@
-/* Financial OS: soft mint theme with white rounded cards, a bright yellow balance card and dark pill buttons. */
+/* Emperio Finances: soft mint theme with white rounded cards, a bright yellow balance card and dark pill buttons. */
 :root {
   --bg-a: #d4ece2; --bg-b: #e6f3df; --bg-c: #f1f7e6;
   --canvas: #e6f2e4; --card: #ffffff; --card2: #f2f5f1; --border: rgba(20, 40, 28, .08); --border2: rgba(20, 40, 28, .16);
@@ -221,7 +221,7 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--primary); 
 .pool.on { box-shadow: 0 0 0 2px var(--primary), var(--shadow); }
 .pool .icon { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; font-size: 20px; flex: none; }
 .pool .left { font-family: var(--mono); font-size: 30px; font-weight: 800; letter-spacing: -.03em; }
-.pool .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; background: var(--card2); border-radius: 14px; padding: 10px; }
+.pool .nums { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; background: var(--card2); border-radius: 14px; padding: 10px; }
 .pool .nums .v { font-family: var(--mono); font-size: 13px; font-weight: 700; }
 
 /* tables */
@@ -387,3 +387,31 @@ table.t input.inline { width: 104px; min-height: 32px; padding: 4px 10px; text-a
 input[type=file] { max-width: 100%; font-size: 13px; color: var(--muted); }
 input[type=file]::file-selector-button { font: inherit; font-weight: 700; border: 0; border-radius: 999px; padding: 10px 18px; margin-right: 10px;
   background: var(--primary); color: var(--primary-text); cursor: pointer; }
+
+/* ------------------------------------------------- zero-based assign bar */
+.assignbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 16px 0 0; border: 2px solid transparent; }
+.assignbar .atotal { font-family: var(--mono); font-size: 30px; font-weight: 800; letter-spacing: -.03em; margin: 2px 0; }
+.assignbar.todo { border-color: var(--amber-bd); background: linear-gradient(135deg, var(--amber-bg), var(--card) 70%); }
+.assignbar.todo .atotal { color: var(--amber); }
+.assignbar.done { border-color: var(--emerald-bd); background: linear-gradient(135deg, var(--emerald-bg), var(--card) 70%); }
+.assignbar.done .atotal { color: var(--emerald); }
+.assignbar.over { border-color: var(--rose-bd); background: linear-gradient(135deg, var(--rose-bg), var(--card) 70%); }
+.assignbar.over .atotal { color: var(--rose); }
+@media (max-width: 720px) { .assignbar > .row { width: 100%; } .assignbar > .row .btn { flex: 1 1 auto; } }
+
+/* --------------------------------------------------------------- tutorial */
+.tour .art { height: 132px; border-radius: 20px; display: grid; place-items: center; font-size: 54px; margin-bottom: 14px;
+  background: radial-gradient(120px 80px at 30% 30%, #2a2418, #0d0d0d); color: #d8b45a; }
+.tour .art img { width: 92px; height: 92px; border-radius: 22px; box-shadow: 0 8px 30px rgba(216, 180, 90, .25); }
+.tour h2 { margin-bottom: 8px; }
+.tour p { margin: 0 0 10px; color: var(--muted); font-size: 15px; line-height: 1.55; }
+.tour ol { margin: 0 0 10px; padding-left: 20px; font-size: 15px; line-height: 1.6; }
+.tour .dots { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+.tour .dots i { width: 7px; height: 7px; border-radius: 9px; background: var(--border2); }
+.tour .dots i.on { background: var(--text); width: 20px; }
+
+/* ------------------------------------------------------------------ brand */
+.brand .brand-sub { font-weight: 500; color: var(--muted); }
+.brandname { font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif; font-weight: 600; letter-spacing: .01em; font-size: 26px; }
+.login-brand { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; margin-bottom: 6px; }
+.login-brand img { border-radius: 18px; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); margin-bottom: 4px; }

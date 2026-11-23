@@ -23,6 +23,7 @@ export const SCHEMA = {
   budget_pools: {
     id: 'TEXT', workspaceId: 'TEXT', name: 'TEXT', color: 'TEXT', icon: 'TEXT', isWorkspaceConnected: 'BOOL',
     fundingMode: 'TEXT', fundingValue: 'REAL', isDefault: 'BOOL', order: 'INT', description: 'TEXT',
+    funded: 'REAL', budgetStart: 'TEXT', filledMonth: 'TEXT',
     createdAt: 'TEXT', updatedAt: 'TEXT',
   },
   pool_transfers: {

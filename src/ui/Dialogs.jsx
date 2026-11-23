@@ -41,7 +41,7 @@ export function QuickAdd({ onClose, mode = 'tx', prefill = {}, wsOverride, perso
   });
   const sx = (k, v) => setX((o) => ({ ...o, [k]: v }));
   // reallocation
-  const [r, setR] = useState({ kind: prefill.kind || 'category', fromId: prefill.fromId || null, toId: prefill.toId || null, amount: '', note: '' });
+  const [r, setR] = useState({ kind: prefill.kind || 'pool', fromId: prefill.fromId || null, toId: prefill.toId || null, amount: '', note: '' });
   const sr = (k, v) => setR((o) => ({ ...o, [k]: v }));
   const cats = fin.categories(ws).filter((c) => c.defaultType !== 'Income');
   const poolNames = Object.fromEntries(pools.map((p) => [p.id, p.name]));
@@ -53,7 +53,7 @@ export function QuickAdd({ onClose, mode = 'tx', prefill = {}, wsOverride, perso
   let avail = '';
   if (rFrom) {
     if (r.kind === 'category') { const c = fin.db.get('categories', rFrom); avail = c ? `Available in line: ${fmtMoney(c.allocated)}` : ''; }
-    else { const m = fin.poolMetrics(ws, month).find((p) => p.id === rFrom); avail = m ? `Pool budget ${fmtMoney(m.allocatedBudget)} · unassigned ${fmtMoney(m.unassigned)}` : ''; }
+    else { const m = fin.poolMetrics(ws, month).find((p) => p.id === rFrom); avail = m ? `Money in ${m.name}: ${fmtMoney(m.available)}` : ''; }
   }
 
   const submit = () => {
@@ -76,7 +76,7 @@ export function QuickAdd({ onClose, mode = 'tx', prefill = {}, wsOverride, perso
     } else {
       if (r.kind === 'category') fin.categoryTransfer(rFrom, rTo, num(r.amount), r.note.trim());
       else fin.poolTransfer(ws, rFrom, rTo, num(r.amount), r.note.trim());
-      app.toast('Reallocated');
+      app.toast('Money moved');
     }
   };
   const del = editing && tab !== 'realloc' ? (
@@ -88,7 +88,7 @@ export function QuickAdd({ onClose, mode = 'tx', prefill = {}, wsOverride, perso
   const wsName = ws !== app.ws ? ` · ${fin.workspace(ws)?.name}` : '';
   return (
     <Modal title={(editing ? 'Edit' : 'Quick add') + wsName} onClose={onClose} onSubmit={submit} footer={del}>
-      {!editing && <div style={{ marginBottom: 12 }}><Seg value={tab} onChange={setTab} options={[['tx', 'Transaction'], ['transfer', 'Transfer'], ['realloc', 'Category / pool transfer']]} /></div>}
+      {!editing && <div style={{ marginBottom: 12 }}><Seg value={tab} onChange={setTab} options={[['tx', 'Transaction'], ['transfer', 'Transfer'], ['realloc', 'Move pool money']]} /></div>}
       {tab === 'tx' && (
         <div class="form two">
           <Field label="Amount"><MoneyInput value={t.amount} onInput={(v) => st('amount', v)} autoFocus={!editing} /></Field>
@@ -121,7 +121,7 @@ export function QuickAdd({ onClose, mode = 'tx', prefill = {}, wsOverride, perso
       )}
       {tab === 'realloc' && (
         <div class="form">
-          <Seg value={r.kind} onChange={(v) => setR({ ...r, kind: v, fromId: null, toId: null })} options={[['category', 'Between categories'], ['pool', 'Between pools']]} />
+          <Seg value={r.kind} onChange={(v) => setR({ ...r, kind: v, fromId: null, toId: null })} options={[['pool', 'Between pools'], ['category', 'Category plans']]} />
           <Field label="From"><Select value={rFrom} onChange={(v) => sr('fromId', v)} options={rOpts} /></Field>
           <div class="small muted">{avail}</div>
           <Field label="To"><Select value={rTo} onChange={(v) => sr('toId', v)} options={rOpts} /></Field>
@@ -140,16 +140,14 @@ export function PoolDialog({ onClose, pool }) {
   const p = pool || {};
   const [d, setD] = useState({
     name: p.name || '', icon: p.icon || POOL_ICONS[n % POOL_ICONS.length], color: p.color || PALETTE[(n + 1) % PALETTE.length],
-    connected: p.isWorkspaceConnected ?? true, mode: ['fixed', 'percent'].includes(p.fundingMode) ? p.fundingMode : 'fixed',
-    value: p.fundingValue ?? '', isDefault: !!p.isDefault, description: p.description || '',
+    connected: p.isWorkspaceConnected ?? true, value: p.fundingValue ?? '', isDefault: !!p.isDefault, description: p.description || '',
   });
   const s = (k, v) => setD((o) => ({ ...o, [k]: v }));
-  const pct = d.connected && d.mode === 'percent';
   return (
-    <Modal title={pool ? 'Edit pool' : 'New budget pool'} sub="Connected pools are funded from your Money at Hand. Standalone pools have their own target budget." onClose={onClose}
+    <Modal title={pool ? 'Edit pool' : 'New budget pool'} sub="A pool is a pot for one job, like Bills, Food or Savings. Each month you give it its monthly amount and spend from it." onClose={onClose}
       onSubmit={() => fin.savePool(ws, {
         ...(pool ? { id: pool.id } : {}), name: d.name, icon: d.icon || '💷', color: d.color, isWorkspaceConnected: d.connected,
-        fundingMode: d.connected ? d.mode : 'unconnected', fundingValue: num(d.value), isDefault: d.isDefault, description: d.description.trim(),
+        fundingValue: num(d.value), isDefault: d.isDefault, description: d.description.trim(),
       })}>
       <div class="form two">
         <Field label="Name" class="full"><input type="text" value={d.name} autoFocus onInput={(e) => s('name', e.currentTarget.value)} /></Field>
@@ -162,9 +160,9 @@ export function PoolDialog({ onClose, pool }) {
             <input type="color" value={d.color} onInput={(e) => s('color', e.currentTarget.value)} style={{ width: 34, height: 28, padding: 0, border: 0, background: 'none' }} />
           </div>
         </div>
-        <Field label="Funding" class="full"><Select value={d.connected ? '1' : '0'} onChange={(v) => s('connected', v === '1')} options={[['1', 'Connected: funded from Money at Hand'], ['0', 'Standalone: independent target budget']]} /></Field>
-        {d.connected && <Field label="Funding mode"><Select value={d.mode} onChange={(v) => s('mode', v)} options={[['fixed', 'Fixed amount (£)'], ['percent', 'Percent of Money at Hand (%)']]} /></Field>}
-        <Field label={pct ? 'Percent of Money at Hand' : 'Target budget (£)'}><MoneyInput value={d.value} onInput={(v) => s('value', v)} /></Field>
+        <Field label="Monthly amount (£)"><MoneyInput value={d.value} onInput={(v) => s('value', v)} /></Field>
+        <Field label="Money comes from"><Select value={d.connected ? '1' : '0'} onChange={(v) => s('connected', v === '1')} options={[['1', 'My bank accounts (normal)'], ['0', 'Outside money (standalone)']]} /></Field>
+        <div class="small muted full">The monthly amount is what “Fill pools” gives this pool each month. You can always assign more or less by hand.</div>
         <Field label="Description" class="full"><input type="text" value={d.description} onInput={(e) => s('description', e.currentTarget.value)} /></Field>
         <label class="check full"><input type="checkbox" checked={d.isDefault} onChange={(e) => s('isDefault', e.currentTarget.checked)} />Default pool for new categories</label>
       </div>
@@ -172,35 +170,38 @@ export function PoolDialog({ onClose, pool }) {
   );
 }
 
-export function PushFunds({ onClose, metric }) {
-  const { fin, ws, month } = useApp();
-  const m = metric;
-  const unpooled = fin.header(ws, month).unpooled;
+/** Assign money from "Left to assign" into a pool, or take it back. */
+export function PushFunds({ onClose, metric, takeBack = false }) {
+  const { fin, ws, month, toast } = useApp();
+  const metrics = fin.poolMetrics(ws, month);
+  const [poolId, setPoolId] = useState(metric?.id || (takeBack ? metrics.find((x) => x.available > 0)?.id : metrics[0]?.id) || null);
+  const m = metrics.find((x) => x.id === poolId) || metrics[0];
+  const left = fin.header(ws, month, metrics).toAssign;
+  const [back, setBack] = useState(takeBack);
   const [amt, setAmt] = useState('');
-  const [exact, setExact] = useState(false);
-  const [total, setTotal] = useState(m.allocatedBudget);
-  const next = Math.max(exact ? num(total) : m.allocatedBudget + num(amt), m.budgetedLines);
-  const warn = m.isWorkspaceConnected && next - m.allocatedBudget > unpooled + 0.004;
+  const conn = m?.isWorkspaceConnected;
+  const after = round2((m?.available || 0) + (back ? -num(amt) : num(amt)));
+  const warn = !back && conn && num(amt) > left + 0.004;
   return (
-    <Modal title={`${m.isWorkspaceConnected ? 'Push funds into' : 'Raise target for'} ${m.icon} ${m.name}`}
-      sub={m.isWorkspaceConnected ? 'Move unallocated Money at Hand into this pool.' : 'Standalone pool: raise its independent target budget.'}
-      onClose={onClose} submitLabel={exact ? 'Set budget' : 'Push funds'}
-      onSubmit={() => (exact ? fin.setPoolBudget(m.id, num(total)) : fin.pushFunds(m.id, num(amt)))}>
+    <Modal title={back ? 'Take money back' : 'Assign money'}
+      sub={back ? 'Moves money out of a pool and back to “Left to assign”.' : conn ? 'Give some of your “Left to assign” money to a pool.' : 'Standalone pool: add outside money to it.'}
+      onClose={onClose} submitLabel={back ? 'Take back' : 'Assign'}
+      onSubmit={() => { fin.assign(m.id, back ? -num(amt) : num(amt)); toast(back ? `Took ${fmtMoney(num(amt))} back from ${m.name}` : `Assigned ${fmtMoney(num(amt))} to ${m.name}`); }}>
       <div class="strip row" style={{ marginBottom: 12, gap: 24 }}>
-        <div><div class="eyebrow">Unallocated cash</div><div class="money">{fmtMoney(unpooled)}</div></div>
-        <div><div class="eyebrow">Pool budget now</div><div class="money">{fmtMoney(m.allocatedBudget)}</div></div>
+        <div><div class="eyebrow">Left to assign</div><div class={`money ${left < 0 ? 'neg' : ''}`}>{fmtMoney(left)}</div></div>
+        <div><div class="eyebrow">In pool now</div><div class="money">{fmtMoney(m?.available || 0)}</div></div>
       </div>
       <div class="form">
-        {!exact && <>
-          <div class="row wrap">
-            {[50, 100, 250, 500].map((v) => <button type="button" key={v} class="btn chip" onClick={() => setAmt(String(round2(num(amt) + v)))}>+£{v}</button>)}
-            {m.isWorkspaceConnected && <button type="button" class="btn chip" onClick={() => setAmt(String(unpooled))}>All unallocated</button>}
-          </div>
-          <Field label="Add amount"><MoneyInput value={amt} onInput={setAmt} autoFocus /></Field>
-        </>}
-        <label class="check"><input type="checkbox" checked={exact} onChange={(e) => setExact(e.currentTarget.checked)} />Set an exact total budget instead</label>
-        {exact && <Field label="Exact total"><MoneyInput value={total} onInput={setTotal} autoFocus /></Field>}
-        <div class={`small ${warn ? 'warn' : 'muted'}`}>New pool budget {fmtMoney(next)} · left to spend {fmtMoney(next - m.spent)}{warn ? ' · ⚠ more than your unallocated cash' : ''}</div>
+        {!metric && <Field label="Pool"><Select value={m?.id} onChange={setPoolId} options={metrics.map((p) => [p.id, `${p.icon} ${p.name} · ${fmtMoney(p.available)}`])} /></Field>}
+        <Seg value={back ? 'back' : 'give'} onChange={(v) => setBack(v === 'back')} options={[['give', 'Give to pool'], ['back', 'Take back']]} />
+        <div class="row wrap">
+          {!back && m?.monthly > 0 && <button type="button" class="btn chip" onClick={() => setAmt(String(m.monthly))}>Monthly amount {fmtMoney(m.monthly)}</button>}
+          {!back && conn && left > 0 && <button type="button" class="btn chip" onClick={() => setAmt(String(left))}>Everything left {fmtMoney(left)}</button>}
+          {back && m?.available > 0 && <button type="button" class="btn chip" onClick={() => setAmt(String(m.available))}>All of it {fmtMoney(m.available)}</button>}
+          {[50, 100, 250].map((v) => <button type="button" key={v} class="btn chip" onClick={() => setAmt(String(round2(num(amt) + v)))}>+£{v}</button>)}
+        </div>
+        <Field label="Amount"><MoneyInput value={amt} onInput={setAmt} autoFocus /></Field>
+        <div class={`small ${warn ? 'warn' : 'muted'}`}>{m?.name} will hold {fmtMoney(after)}{conn ? ` · left to assign ${fmtMoney(round2(left + (back ? num(amt) : -num(amt))))}` : ''}{warn ? ' · ⚠ more than you have left to assign' : ''}</div>
       </div>
     </Modal>
   );
@@ -209,31 +210,36 @@ export function PushFunds({ onClose, metric }) {
 export function DeletePool({ onClose, metric }) {
   const { fin, ws } = useApp();
   const m = metric;
-  const nonEmpty = m.allocatedBudget > 0 || m.lines.length || m.spent > 0;
+  const nonEmpty = Math.abs(m.available) > 0.004 || m.lines.length || m.spent > 0 || m.funded > 0;
   const others = fin.pools(ws).filter((p) => p.id !== m.id);
   const [target, setTarget] = useState(others[0]?.id || null);
   return (
     <Modal title={`Delete ${m.name}`} danger submitLabel="Delete pool" onClose={onClose}
-      sub={nonEmpty ? `This pool holds ${fmtMoney(m.allocatedBudget)} and ${m.lines.length} categories. Its budget, categories and transactions move to the pool you choose.` : 'This pool is empty and can be deleted.'}
+      sub={nonEmpty ? `This pool holds ${fmtMoney(m.available)} and ${m.lines.length} categories. Its money, categories and transactions move to the pool you choose.` : 'This pool is empty and can be deleted.'}
       onSubmit={() => fin.deletePool(m.id, nonEmpty ? target : null)}>
       {nonEmpty && <Field label="Move everything to"><Select value={target} onChange={setTarget} options={others.map((p) => [p.id, `${p.icon} ${p.name}`])} /></Field>}
     </Modal>
   );
 }
 
-export function CoverOverspend({ onClose, line, metric, metrics }) {
-  const { fin, month } = useApp();
+/** An overspent pool: top it up from "Left to assign" or from another pool. */
+export function CoverOverspend({ onClose, metric }) {
+  const { fin, ws, month, toast } = useApp();
+  const metrics = fin.poolMetrics(ws, month);
+  const m = metrics.find((x) => x.id === metric.id) || metric;
+  const left = fin.header(ws, month, metrics).toAssign;
   const opts = [
-    ...metric.lines.filter((l) => l.id !== line.id && l.remaining > 0).map((l) => [`category:${l.id}`, `Category · ${l.name} (surplus ${fmtMoney(l.remaining)})`]),
-    ...metrics.filter((m) => m.id !== metric.id && m.unassigned > 0).map((m) => [`pool:${m.id}`, `Pool · ${m.icon} ${m.name} (unassigned ${fmtMoney(m.unassigned)})`]),
+    ...(m.isWorkspaceConnected && left > 0.004 ? [['cash', `Left to assign (${fmtMoney(left)})`]] : []),
+    ...metrics.filter((x) => x.id !== m.id && x.available > 0.004 && !!x.isWorkspaceConnected === !!m.isWorkspaceConnected)
+      .map((x) => [x.id, `${x.icon} ${x.name} (${fmtMoney(x.available)})`]),
   ];
   const [src, setSrc] = useState(opts[0]?.[0] || null);
   return (
-    <Modal title={`Cover overspend on ${line.name}`} sub={`${line.name} is ${fmtMoney(-line.remaining)} over its line. Choose where to cover it from.`}
-      onClose={onClose} submitLabel="Cover overspend" busy={!opts.length}
-      onSubmit={() => { const [k, id] = src.split(':'); fin.coverOverspend(line.id, k, id, month); }}>
-      {opts.length ? <Field label="Cover from"><Select value={src} onChange={setSrc} options={opts} /></Field>
-        : <div class="notice">No surplus categories or pools with unassigned budget. Push funds into this pool instead.</div>}
+    <Modal title={`Cover ${m.name}`} sub={`${m.name} is ${fmtMoney(-m.available)} overspent. Choose where the money comes from.`}
+      onClose={onClose} submitLabel="Cover it" busy={!opts.length}
+      onSubmit={() => { const a = fin.coverPool(m.id, src); toast(`Covered ${fmtMoney(a)}`); }}>
+      {opts.length ? <Field label="Take it from"><Select value={src} onChange={setSrc} options={opts} /></Field>
+        : <div class="notice">There's no spare money right now. Add income, then come back and cover it.</div>}
     </Modal>
   );
 }

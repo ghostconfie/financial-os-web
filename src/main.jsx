@@ -30,7 +30,7 @@ function Splash({ text, children }) {
     <div class="login">
       <div class="card" style={{ textAlign: 'center' }}>
         <img src="icons/icon-192.png" alt="" width="56" height="56" style={{ borderRadius: 14 }} />
-        <h2 style={{ margin: '12px 0 6px' }}>Financial OS</h2>
+        <h2 class="brandname" style={{ margin: '12px 0 6px' }}>Emperio Finances</h2>
         <div class="muted">{text}</div>
         {children}
       </div>
@@ -55,7 +55,7 @@ function Login({ cloudApi }) {
   return (
     <div class="login">
       <form class="card form" onSubmit={submit}>
-        <div class="row"><img src="icons/icon-192.png" alt="" width="40" height="40" style={{ borderRadius: 10 }} /><div><h2>Financial OS</h2><div class="muted small">Sign in to see your money</div></div></div>
+        <div class="login-brand"><img src="icons/icon-192.png" alt="" width="72" height="72" /><h2 class="brandname">Emperio Finances</h2><div class="muted small">Sign in to see your money</div></div>
         <label class="field"><span>Email</span><input type="email" autoComplete="username" value={email} onInput={(e) => setEmail(e.currentTarget.value)} required /></label>
         <label class="field"><span>Password</span><input type="password" autoComplete="current-password" value={pw} onInput={(e) => setPw(e.currentTarget.value)} required /></label>
         {err && <div class="notice rose">{err}</div>}

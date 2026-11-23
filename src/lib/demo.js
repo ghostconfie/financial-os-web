@@ -102,5 +102,6 @@ export function loadDemo(fin, seed = 7) {
     }
   }
   db.commit();
+  fin.fillPools(ws); // zero-based: give each pool this month's money
   return ws;
 }

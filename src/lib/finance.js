@@ -57,6 +57,7 @@ export class Finance {
     const pool = this.db.insert('budget_pools', {
       workspaceId: wsId, name: 'Everyday Spending', color: '#10b981', icon: '🛒', isWorkspaceConnected: true,
       fundingMode: 'fixed', fundingValue: 0, isDefault: true, order: 0, description: 'Default pool for day-to-day costs.',
+      funded: 0, budgetStart: `${monthKey()}-01`,
     });
     for (const [name, type, color] of PROTECTED_CATEGORIES) {
       this.db.insert('categories', {
@@ -353,15 +354,29 @@ export class Finance {
   }
 
   // ================================================================= pools
+  // Zero-based budgeting with pools:
+  //   • Every pound in your bank accounts (Money at Hand) should sit in a pool.
+  //   • "Left to assign" = Money at Hand − money sitting in connected pools. Aim for £0.00.
+  //   • Assigning moves money from "Left to assign" into a pool. Spending takes it out of the pool.
+  //   • Income raises "Left to assign"; unspent pool money carries over to next month.
+  //   • Each pool has a monthly amount (its plan). "Fill pools" gives every pool its monthly amount once a month.
+  // A pool's money = funded − spending in that pool since budgetStart.
   pools(ws) { return this.db.all('budget_pools', { workspaceId: ws }).sort(byOrder); }
+
+  _monthStart(month = monthKey()) { return `${month}-01`; }
 
   savePool(ws, data, commit = true) {
     const d = { ...data };
     if (!(d.name || '').trim()) throw new FinanceError('Pool name is required.');
     d.name = d.name.trim();
     d.workspaceId = ws;
-    if (!d.isWorkspaceConnected) d.fundingMode = 'unconnected';
-    else if (d.fundingMode === 'unconnected' || !d.fundingMode) d.fundingMode = 'fixed';
+    if (d.fundingMode === 'percent') {
+      // old "% of money at hand" pools become a fixed monthly amount
+      d.fundingValue = round2(this.moneyAtHand(ws) * (Number(d.fundingValue) || 0) / 100);
+    }
+    if (d.isWorkspaceConnected === undefined && d.id) d.isWorkspaceConnected = this.db.get('budget_pools', d.id)?.isWorkspaceConnected ?? true;
+    d.fundingMode = d.isWorkspaceConnected ? 'fixed' : 'unconnected';
+    if (d.fundingValue !== undefined) d.fundingValue = Math.max(0, Number(d.fundingValue) || 0);
     if (d.isDefault) {
       for (const p of this.pools(ws)) {
         if (p.id !== d.id && p.isDefault) this.db.update('budget_pools', p.id, { isDefault: false });
@@ -369,6 +384,8 @@ export class Finance {
     }
     let out;
     if (d.id) {
+      this._ensureBudget(d.id);
+      delete d.funded; delete d.budgetStart; delete d.filledMonth;
       out = this.db.update('budget_pools', d.id, d);
       for (const t of this.db.raw('transactions')) {
         if (t.poolId === out.id && t.poolName !== out.name) this.db.update('transactions', t.id, { poolName: out.name });
@@ -376,6 +393,8 @@ export class Finance {
     } else {
       d.order ??= this.pools(ws).length;
       d.fundingValue ??= 0;
+      d.funded ??= 0;
+      d.budgetStart ||= this._monthStart();
       if (!this.pools(ws).length) d.isDefault = true;
       out = this.db.insert('budget_pools', d);
     }
@@ -383,9 +402,41 @@ export class Finance {
     return out;
   }
 
-  _configuredBudget(pool, mah) {
-    if (pool.fundingMode === 'percent') return round2(mah * pool.fundingValue / 100);
-    return pool.fundingValue;
+  /** Older data: pool budget = max(fixed / % value, category lines). */
+  _legacyBudget(pool, ws) {
+    let v = pool.fundingValue || 0;
+    if (pool.fundingMode === 'percent') v = round2(this.moneyAtHand(ws) * v / 100);
+    let lines = 0;
+    for (const c of this.db.raw('categories')) if (c.poolId === pool.id) lines += c.allocated || 0;
+    return round2(Math.max(v, lines));
+  }
+
+  /** Pools saved before zero-based budgeting get a starting balance equal to their old budget (no money lost). */
+  _budgetFields(pool) {
+    if (pool.budgetStart) return pool;
+    const legacy = this._legacyBudget(pool, pool.workspaceId);
+    return {
+      ...pool, budgetStart: this._monthStart(), funded: legacy, filledMonth: monthKey(),
+      fundingMode: pool.isWorkspaceConnected ? 'fixed' : 'unconnected',
+      fundingValue: pool.fundingMode === 'percent' ? legacy : pool.fundingValue,
+    };
+  }
+
+  _ensureBudget(poolId) {
+    const p = this.db.get('budget_pools', poolId);
+    if (!p || p.budgetStart) return p;
+    const f = this._budgetFields(p);
+    return this.db.update('budget_pools', poolId, {
+      budgetStart: f.budgetStart, funded: f.funded, filledMonth: f.filledMonth, fundingMode: f.fundingMode, fundingValue: f.fundingValue,
+    });
+  }
+
+  /** Save the starting balance on any pool that doesn't have one yet. Safe to call often. */
+  migrateBudgets() {
+    let n = 0;
+    for (const p of this.db.all('budget_pools')) if (!p.budgetStart) { this._ensureBudget(p.id); n++; }
+    if (n) this.db.commit();
+    return n;
   }
 
   _spendIndex(ws, month) {
@@ -401,134 +452,197 @@ export class Finance {
   }
 
   poolMetrics(ws, month) {
-    const mah = this.moneyAtHand(ws);
     const cats = this.categories(ws);
     const [byCat, byPool] = this._spendIndex(ws, month);
-    return this.pools(ws).map((p) => {
+    const pools = this.pools(ws).map((p) => this._budgetFields(p));
+    const since = new Map();
+    const starts = new Map(pools.map((p) => [p.id, p.budgetStart]));
+    for (const t of this.db.raw('transactions')) {
+      if (t.workspaceId !== ws || t.type === 'Income' || !starts.has(t.poolId)) continue;
+      if (t.date < starts.get(t.poolId)) continue;
+      since.set(t.poolId, (since.get(t.poolId) || 0) - t.amount);
+    }
+    const cur = monthKey();
+    return pools.map((p) => {
       const lines = cats.filter((c) => c.poolId === p.id).map((c) => {
         const spent = round2(byCat.get(`${p.id}|${lc(c.name)}`) || 0);
         const pct = c.allocated ? spent / c.allocated * 100 : (spent ? 100 : 0);
         return { ...c, spent, remaining: round2(c.allocated - spent), pctUsed: pct };
       });
-      const budgeted = round2(lines.reduce((s, l) => s + l.allocated, 0));
-      const configured = this._configuredBudget(p, mah);
-      const allocated = round2(Math.max(configured, budgeted));
+      const budgetedLines = round2(lines.reduce((s, l) => s + l.allocated, 0));
       const spent = round2(byPool.get(p.id) || 0);
+      const available = round2(p.funded - (since.get(p.id) || 0));
+      const monthly = round2(Math.max(p.fundingValue || 0, budgetedLines));
+      const base = spent + Math.max(available, 0);
       return {
-        ...p, configuredBudget: configured, allocatedBudget: allocated, spent, budgetedLines: budgeted,
-        leftToSpend: round2(allocated - spent), unassigned: round2(allocated - budgeted),
-        pctSpent: allocated ? spent / allocated * 100 : (spent ? 100 : 0), lines,
+        ...p, available, monthly, spent, budgetedLines, lines, filledThisMonth: p.filledMonth === cur,
+        // kept for older screens
+        leftToSpend: available, allocatedBudget: round2(spent + available),
+        pctSpent: base > 0 ? spent / base * 100 : (spent ? 100 : 0),
       };
     });
   }
 
+  /** The top of the budget: what you have, what's in pools, and what's left to assign (aim: £0.00). */
   header(ws, month, metrics = null) {
     metrics ||= this.poolMetrics(ws, month);
     const mah = this.moneyAtHand(ws);
-    const assigned = round2(metrics.filter((m) => m.isWorkspaceConnected).reduce((s, m) => s + m.allocatedBudget, 0));
+    const conn = metrics.filter((m) => m.isWorkspaceConnected);
+    const inPools = round2(conn.reduce((s, m) => s + m.available, 0));
+    const toAssign = round2(mah - inPools);
+    const toFill = conn.filter((m) => !m.filledThisMonth && m.monthly > 0);
     return {
-      moneyAtHand: mah, assigned, unpooled: round2(Math.max(0, mah - assigned)),
-      standalone: round2(metrics.filter((m) => !m.isWorkspaceConnected).reduce((s, m) => s + m.allocatedBudget, 0)),
+      moneyAtHand: mah, inPools, toAssign, assigned: inPools, unpooled: toAssign,
+      standalone: round2(metrics.filter((m) => !m.isWorkspaceConnected).reduce((s, m) => s + m.available, 0)),
+      fillNeeded: round2(toFill.reduce((s, m) => s + m.monthly, 0)), fillCount: toFill.length,
+      overspent: metrics.filter((m) => m.available < -0.004),
     };
   }
 
   _poolMetric(poolId, month = null) {
     const pool = this.db.get('budget_pools', poolId);
+    if (!pool) throw new FinanceError('That pool no longer exists.');
     return this.poolMetrics(pool.workspaceId, month).find((m) => m.id === poolId);
   }
 
-  /** Push cash at hand into a pool by raising its explicit budget. */
-  pushFunds(poolId, amount) {
-    if (!(amount > 0)) throw new FinanceError('Amount must be more than £0.00.');
-    const m = this._poolMetric(poolId);
-    this.setPoolBudget(poolId, m.allocatedBudget + amount, 'Pushed from cash at hand');
+  _log(ws, fromId, toId, fromName, toName, amount, note) {
+    this.db.insert('pool_transfers', {
+      workspaceId: ws, fromPoolId: fromId, toPoolId: toId, fromPoolName: fromName, toPoolName: toName,
+      amount: round2(Math.abs(amount)), note, date: todayStr(),
+    });
   }
 
-  setPoolBudget(poolId, total, note = 'Set exact total budget') {
-    const pool = this.db.get('budget_pools', poolId);
+  /**
+   * Give a pool money from "Left to assign" (or take it back with a negative amount).
+   * Connected pools can only be given money you actually have.
+   */
+  assign(poolId, amount, note = '', commit = true) {
+    amount = round2(amount);
+    if (!amount) throw new FinanceError('Enter an amount.');
+    this._ensureBudget(poolId);
     const m = this._poolMetric(poolId);
-    total = Math.max(0, Number(total) || 0);
-    const fields = { fundingValue: total };
-    if (pool.fundingMode === 'percent') fields.fundingMode = 'fixed';
-    this.db.update('budget_pools', poolId, fields);
-    const delta = round2(total - m.allocatedBudget);
-    if (delta) {
-      const cash = pool.isWorkspaceConnected ? 'Cash at Hand' : 'External / Standalone';
-      this.db.insert('pool_transfers', {
-        workspaceId: pool.workspaceId, fromPoolId: delta > 0 ? null : poolId, toPoolId: delta > 0 ? poolId : null,
-        fromPoolName: delta > 0 ? cash : pool.name, toPoolName: delta > 0 ? pool.name : cash,
-        amount: Math.abs(delta), note, date: todayStr(),
-      });
+    const cash = m.isWorkspaceConnected ? 'Left to assign' : 'Outside money';
+    if (amount > 0 && m.isWorkspaceConnected) {
+      const left = this.header(m.workspaceId).toAssign;
+      if (amount > left + 0.004) {
+        throw new FinanceError(left > 0
+          ? `You only have ${fmtMoney(left)} left to assign. Assign that, or move money from another pool.`
+          : 'You have no money left to assign. Add income first, or move money from another pool.');
+      }
+    }
+    if (amount < 0 && -amount > Math.max(m.available, 0) + 0.004) {
+      throw new FinanceError(`${m.name} only has ${fmtMoney(Math.max(m.available, 0))} to take back.`);
+    }
+    this.db.update('budget_pools', poolId, { funded: round2(m.funded + amount) });
+    if (amount > 0) this._log(m.workspaceId, null, poolId, cash, m.name, amount, note || 'Assigned');
+    else this._log(m.workspaceId, poolId, null, m.name, cash, amount, note || 'Taken back');
+    if (commit) this.db.commit();
+  }
+
+  /** Give every connected pool its monthly amount for this month (once per month), as far as the money goes. */
+  fillPools(ws) {
+    const cur = monthKey();
+    let left = this.header(ws).toAssign;
+    const done = [], short = [];
+    for (const m of this.poolMetrics(ws)) {
+      if (m.filledMonth === cur || !(m.monthly > 0)) continue;
+      let give = m.monthly;
+      if (m.isWorkspaceConnected) give = round2(Math.min(give, Math.max(left, 0)));
+      if (give < m.monthly - 0.004) short.push(m.name);
+      this._ensureBudget(m.id);
+      if (give > 0) {
+        this.db.update('budget_pools', m.id, { funded: round2(m.funded + give), filledMonth: cur });
+        this._log(ws, null, m.id, m.isWorkspaceConnected ? 'Left to assign' : 'Outside money', m.name, give, `Monthly amount for ${cur}`);
+        if (m.isWorkspaceConnected) left = round2(left - give);
+        done.push([m.name, give]);
+      }
     }
     this.db.commit();
+    return { done, short, total: round2(done.reduce((s, d) => s + d[1], 0)) };
   }
 
-  poolTransfer(ws, fromId, toId, amount, note = '') {
+  /** Move money between two pools. */
+  poolTransfer(ws, fromId, toId, amount, note = '', commit = true) {
     if (fromId === toId) throw new FinanceError('Choose two different pools.');
     amount = round2(amount);
     if (amount <= 0) throw new FinanceError('Amount must be more than £0.00.');
+    this._ensureBudget(fromId); this._ensureBudget(toId);
     const src = this._poolMetric(fromId), dst = this._poolMetric(toId);
-    if (amount > src.allocatedBudget + 0.001) {
-      throw new FinanceError(`${src.name} only has ${fmtMoney(src.allocatedBudget)} allocated.`);
+    if (!!src.isWorkspaceConnected !== !!dst.isWorkspaceConnected) {
+      throw new FinanceError('Standalone pools use outside money, so they can only swap money with other standalone pools.');
     }
-    const newSrc = src.allocatedBudget - amount;
-    if (newSrc < src.budgetedLines - 0.001) {
-      throw new FinanceError(`${src.name} has ${fmtMoney(src.budgetedLines)} budgeted to categories. `
-        + 'Lower those category lines first, or transfer less.');
+    if (amount > Math.max(src.available, 0) + 0.004) {
+      throw new FinanceError(`${src.name} only has ${fmtMoney(Math.max(src.available, 0))} in it.`);
     }
-    this.db.update('budget_pools', fromId, { fundingValue: newSrc, fundingMode: src.isWorkspaceConnected ? 'fixed' : 'unconnected' });
-    this.db.update('budget_pools', toId, { fundingValue: dst.allocatedBudget + amount, fundingMode: dst.isWorkspaceConnected ? 'fixed' : 'unconnected' });
-    this.db.insert('pool_transfers', {
-      workspaceId: ws, fromPoolId: fromId, toPoolId: toId, fromPoolName: src.name, toPoolName: dst.name,
-      amount, note, date: todayStr(),
-    });
-    this.db.commit();
+    this.db.update('budget_pools', fromId, { funded: round2(src.funded - amount) });
+    this.db.update('budget_pools', toId, { funded: round2(dst.funded + amount) });
+    this._log(ws, fromId, toId, src.name, dst.name, amount, note);
+    if (commit) this.db.commit();
   }
 
+  // kept so older calls still work
+  pushFunds(poolId, amount) {
+    if (!(amount > 0)) throw new FinanceError('Amount must be more than £0.00.');
+    this.assign(poolId, amount, 'Assigned');
+  }
+
+  /** Move part of one category's monthly plan to another. Across pools, the money moves too. */
   categoryTransfer(fromCat, toCat, amount, note = '', commit = true) {
     const a = this.db.get('categories', fromCat), b = this.db.get('categories', toCat);
     amount = round2(amount);
     if (!a || !b) throw new FinanceError('Choose both categories.');
     if (a.id === b.id) throw new FinanceError('Choose two different categories.');
-    if (amount <= 0 || amount > a.allocated + 0.001) throw new FinanceError(`${a.name} only has ${fmtMoney(a.allocated)} allocated.`);
+    if (amount <= 0 || amount > a.allocated + 0.001) throw new FinanceError(`${a.name} only has ${fmtMoney(a.allocated)} planned.`);
     if (a.poolId !== b.poolId && a.poolId && b.poolId) {
-      const pa = this._poolMetric(a.poolId), pb = this._poolMetric(b.poolId);
-      this.db.update('budget_pools', pa.id, { fundingValue: Math.max(0, pa.allocatedBudget - amount) });
-      this.db.update('budget_pools', pb.id, { fundingValue: pb.allocatedBudget + amount });
+      this.poolTransfer(a.workspaceId, a.poolId, b.poolId, amount, note || `${a.name} → ${b.name}`, false);
+    } else {
+      const pa = a.poolId ? this.db.get('budget_pools', a.poolId) : null;
+      this._log(a.workspaceId, a.poolId, b.poolId, `${pa ? pa.name : '—'} · ${a.name}`, `${pa ? pa.name : '—'} · ${b.name}`, amount, note || 'Category plan moved');
     }
     this.db.update('categories', a.id, { allocated: a.allocated - amount });
     this.db.update('categories', b.id, { allocated: b.allocated + amount });
-    const pa = a.poolId ? this.db.get('budget_pools', a.poolId) : null;
-    const pb = b.poolId ? this.db.get('budget_pools', b.poolId) : null;
-    this.db.insert('pool_transfers', {
-      workspaceId: a.workspaceId, fromPoolId: a.poolId, toPoolId: b.poolId,
-      fromPoolName: `${pa ? pa.name : '—'} · ${a.name}`, toPoolName: `${pb ? pb.name : '—'} · ${b.name}`,
-      amount, note: note || 'Category reallocation', date: todayStr(),
-    });
     if (commit) this.db.commit();
   }
 
-  /** Cover a category's deficit from a surplus category or another pool. */
+  /** Cover an overspent pool from "Left to assign" ('cash') or from another pool. Returns the amount moved. */
+  coverPool(poolId, source) {
+    const m = this._poolMetric(poolId);
+    const deficit = round2(-m.available);
+    if (deficit <= 0) throw new FinanceError(`${m.name} is not overspent.`);
+    let amt;
+    if (source === 'cash') {
+      const left = this.header(m.workspaceId).toAssign;
+      amt = round2(Math.min(deficit, Math.max(left, 0)));
+      if (amt <= 0) throw new FinanceError('There is nothing left to assign. Cover it from another pool.');
+      this.assign(poolId, amt, 'Cover overspending');
+    } else {
+      const src = this._poolMetric(source);
+      amt = round2(Math.min(deficit, Math.max(src.available, 0)));
+      if (amt <= 0) throw new FinanceError(`${src.name} has no money to give.`);
+      this.poolTransfer(m.workspaceId, source, poolId, amt, 'Cover overspending');
+    }
+    return amt;
+  }
+
+  /** Older call: cover a category from a pool (now moves pool money). */
   coverOverspend(catId, sourceKind, sourceId, month = null) {
     const cat = this.db.get('categories', catId);
     const m = this._poolMetric(cat.poolId, month);
     const line = m.lines.find((l) => l.id === catId);
     const deficit = round2(-line.remaining);
     if (deficit <= 0) throw new FinanceError(`${cat.name} is not overspent.`);
-    let amt;
     if (sourceKind === 'category') {
       const src = m.lines.find((l) => l.id === sourceId);
-      amt = Math.min(deficit, src.remaining);
+      const amt = Math.min(deficit, src.remaining);
       this.categoryTransfer(sourceId, catId, amt, `Cover overspend on ${cat.name}`);
-    } else {
-      const src = this._poolMetric(sourceId, month);
-      const spare = src.allocatedBudget - src.budgetedLines;
-      amt = Math.min(deficit, Math.max(spare, 0));
-      if (amt <= 0) throw new FinanceError(`${src.name} has no unassigned budget to give.`);
-      this.poolTransfer(cat.workspaceId, sourceId, cat.poolId, amt, `Cover overspend on ${cat.name}`);
-      this.db.update('categories', catId, { allocated: cat.allocated + amt });
-      this.db.commit();
+      return amt;
     }
+    const src = this._poolMetric(sourceId, month);
+    const amt = round2(Math.min(deficit, Math.max(src.available, 0)));
+    if (amt <= 0) throw new FinanceError(`${src.name} has no money to give.`);
+    this.poolTransfer(cat.workspaceId, sourceId, cat.poolId, amt, `Cover overspend on ${cat.name}`, false);
+    this.db.update('categories', catId, { allocated: cat.allocated + amt });
+    this.db.commit();
     return amt;
   }
 
@@ -538,25 +652,26 @@ export class Finance {
     if (this.pools(ws).length <= 1) throw new FinanceError('A workspace needs at least one pool.');
     const m = this._poolMetric(poolId);
     const cats = this.categories(ws).filter((c) => c.poolId === poolId);
-    const nonEmpty = m.allocatedBudget > 0 || cats.length || m.spent > 0;
+    const nonEmpty = Math.abs(m.available) > 0.004 || cats.length || m.spent > 0 || m.funded > 0;
     if (nonEmpty && !targetPoolId) {
-      throw new FinanceError("This pool isn't empty. Choose a pool to receive its balance and categories.");
+      throw new FinanceError("This pool isn't empty. Choose a pool to receive its money and categories.");
     }
     if (targetPoolId) {
-      const tgt = this._poolMetric(targetPoolId);
-      for (const c of cats) this.setCategoryPool(c.id, targetPoolId, false);
+      this._ensureBudget(poolId); this._ensureBudget(targetPoolId);
       const target = this.db.get('budget_pools', targetPoolId);
+      const want = round2(this._poolMetric(targetPoolId).available + m.available);
+      for (const c of cats) this.setCategoryPool(c.id, targetPoolId, false);
       for (const t of this.db.raw('transactions')) {
         if (t.poolId === poolId) this.db.update('transactions', t.id, { poolId: targetPoolId, poolName: target.name });
       }
-      if (m.allocatedBudget > 0) {
-        this.db.update('budget_pools', targetPoolId, { fundingValue: tgt.allocatedBudget + m.allocatedBudget });
-        this.db.insert('pool_transfers', {
-          workspaceId: ws, fromPoolId: poolId, toPoolId: targetPoolId, fromPoolName: pool.name, toPoolName: target.name,
-          amount: m.allocatedBudget, note: 'Pool deleted, balance moved', date: todayStr(),
-        });
-      }
+      // the target ends up holding both pools' money
       if (pool.isDefault) this.db.update('budget_pools', targetPoolId, { isDefault: true });
+      this.db.delete('budget_pools', poolId);
+      const got = this._poolMetric(targetPoolId).available;
+      this.db.update('budget_pools', targetPoolId, { funded: round2(target.funded + want - got) });
+      if (Math.abs(m.available) > 0.004) {
+        this._log(ws, poolId, targetPoolId, pool.name, target.name, m.available, 'Pool deleted, money moved');
+      }
     } else if (pool.isDefault) {
       const other = this.pools(ws).find((p) => p.id !== poolId);
       this.db.update('budget_pools', other.id, { isDefault: true });

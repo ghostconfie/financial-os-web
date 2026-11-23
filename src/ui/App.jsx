@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { fmtMoney, monthKey } from '../lib/util.js';
 import { Ctx, Icon } from './components.jsx';
 import { Home } from './Home.jsx';
+import { TOUR_KEY, Tour } from './Tour.jsx';
 import { Accounts, Analysis, Bills, Calendar, Categories, DLA, Transactions } from './Tools.jsx';
 import {
   AccountDialog, BillDialog, CategoryDialog, Confirm, CoverOverspend, DeleteAccount, DeletePool, GoalDialog,
@@ -25,7 +26,7 @@ const SettingsDialog = lazy(() => import('./BackupDialogs.jsx'), 'SettingsDialog
 const DIALOGS = {
   quick: QuickAdd, pool: PoolDialog, push: PushFunds, deletePool: DeletePool, cover: CoverOverspend, category: CategoryDialog,
   remap: RemapDialog, bill: BillDialog, goal: GoalDialog, account: AccountDialog, deleteAccount: DeleteAccount,
-  workspaces: WorkspaceDialog, confirm: Confirm, import: ImportDialog, backup: BackupDialog, restore: RestoreDialog, settings: SettingsDialog,
+  workspaces: WorkspaceDialog, confirm: Confirm, tour: Tour, import: ImportDialog, backup: BackupDialog, restore: RestoreDialog, settings: SettingsDialog,
 };
 const TABS = [
   ['home', 'Budget Pools', '◎'], ['accounts', 'Accounts', '🏦'], ['tx', 'Transactions', '≡'], ['calendar', 'Calendar & P&L', '▦'],
@@ -63,6 +64,10 @@ export function App({ fin, sync: initialSync, onStatus }) {
   const toastTimer = useRef();
 
   useEffect(() => fin.db.subscribe(setVersion), []);
+  // pools saved by older versions get their starting money recorded (zero-based budgeting)
+  useEffect(() => { try { fin.migrateBudgets(); } catch (ex) { console.error(ex); } }, [version]);
+  // first visit: show the short tutorial
+  useEffect(() => { if (!ls.get(TOUR_KEY, null)) open('tour'); }, []);
   useEffect(() => onStatus((s) => setSync((o) => ({ ...o, ...s }))), []);
   useEffect(() => { applyTheme(theme); ls.set('fos.theme', theme); }, [theme]);
   useEffect(() => {
@@ -128,6 +133,7 @@ export function App({ fin, sync: initialSync, onStatus }) {
       <button onClick={() => open('backup')}>⬇︎ Back up everything to Excel</button>
       <button onClick={() => open('restore')}>↺ Restore from Excel backup</button>
       <hr />
+      <button onClick={() => open('tour')}>? How to use Emperio</button>
       <button onClick={() => open('workspaces')}>▤ Workspaces</button>
       <button onClick={() => { setThemeState(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); setMenu(false); }}>◐ {document.documentElement.dataset.theme === 'dark' ? 'Light' : 'Dark'} theme</button>
       <button onClick={() => open('settings')}>⚙︎ Settings</button>
@@ -150,7 +156,7 @@ export function App({ fin, sync: initialSync, onStatus }) {
       <div class="app">
         <header class="topbar">
           <div class="topbar-in">
-            <div class="brand"><img src="icons/icon-192.png" alt="" /><span class="hide-sm">Financial OS</span></div>
+            <div class="brand"><img src="icons/icon-192.png" alt="" /><span class="hide-sm">Emperio <span class="brand-sub">Finances</span></span></div>
             <select aria-label="Workspace" class="wspill" value={ws} onChange={(e) => {
               const v = e.currentTarget.value;
               if (v === '__manage') { e.currentTarget.value = ws; open('workspaces'); } else setWs(v);
