@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'preact/hooks';
-import { fmtDate, fmtMoney, monthKey, monthLabel, shiftMonth } from '../lib/util.js';
+import { fmtDate, fmtMoney, monthKey, monthLabel, round2, shiftMonth } from '../lib/util.js';
 import { Bar, Donut, Empty, Icon, Money, Pill, Seg, Sparkline, Stat, TxRow, useApp, useCatColors } from './components.jsx';
 
 const FILTERS = [['ALL', 'All'], ['Expense', 'Expenses'], ['Bills', 'Bills'], ['Debt Payment', 'Debt'], ['Savings', 'Savings'], ['Investment', 'Investments']];
@@ -20,9 +20,9 @@ export function MonthBar() {
   );
 }
 
-function PoolCard({ m, active, onPick }) {
+function PoolCard({ m, active, onPick, month }) {
   const { open } = useApp();
-  const over = m.leftToSpend < -0.004;
+  const over = m.available < -0.004;
   return (
     <div class={`card pool ${active ? 'on' : ''}`} onClick={onPick}>
       <div class="row">
@@ -30,31 +30,66 @@ function PoolCard({ m, active, onPick }) {
         <div class="grow">
           <div style={{ fontWeight: 650 }}>{m.name}</div>
           <div class="row" style={{ gap: 4, marginTop: 2 }}>
-            <Pill tone={m.isWorkspaceConnected ? '' : 'amber'}>{m.isWorkspaceConnected ? 'Connected' : 'Standalone'}</Pill>
+            {!m.isWorkspaceConnected && <Pill tone="amber">Standalone</Pill>}
             {m.isDefault && <Pill tone="dark">Default</Pill>}
-            {m.fundingMode === 'percent' && <Pill>{m.fundingValue}% of cash</Pill>}
+            {m.filledThisMonth && m.monthly > 0 && <Pill tone="emerald">Filled ✓</Pill>}
           </div>
         </div>
       </div>
       <div>
-        <div class="eyebrow">Money left to spend</div>
-        <div class={`left ${over ? 'neg' : ''}`}>{fmtMoney(m.leftToSpend)}</div>
+        <div class="eyebrow">Money in this pool</div>
+        <div class={`left ${over ? 'neg' : ''}`}>{fmtMoney(m.available)}</div>
       </div>
       <Bar pct={m.pctSpent} color={over ? 'var(--rose)' : m.pctSpent >= 90 ? 'var(--amber)' : m.color} />
-      <div class={`small ${over ? 'neg' : 'muted'}`}>{Math.round(m.pctSpent)}% spent{over ? ' · overspent' : ''}</div>
+      <div class={`small ${over ? 'neg' : 'muted'}`}>{over ? `Overspent by ${fmtMoney(-m.available)}` : `${fmtMoney(m.spent)} spent ${month ? 'this month' : 'in total'}`}</div>
       <div class="nums">
-        <div><div class="eyebrow" style={{ fontSize: 10 }}>Allocated</div><div class="v">{fmtMoney(m.allocatedBudget)}</div></div>
+        <div><div class="eyebrow" style={{ fontSize: 10 }}>Monthly amount</div><div class="v">{fmtMoney(m.monthly)}</div></div>
         <div><div class="eyebrow" style={{ fontSize: 10 }}>Spent</div><div class="v">{fmtMoney(m.spent)}</div></div>
-        <div><div class="eyebrow" style={{ fontSize: 10 }}>Budgeted lines</div><div class="v">{fmtMoney(m.budgetedLines)}</div></div>
       </div>
-      <button class="btn primary block" onClick={(e) => { e.stopPropagation(); open('push', { metric: m }); }}>
-        {m.isWorkspaceConnected ? '+ Push funds from cash at hand' : '+ Raise target budget'}
-      </button>
+      {over
+        ? <button class="btn danger block" onClick={(e) => { e.stopPropagation(); open('cover', { metric: m }); }}>Cover {fmtMoney(-m.available)}</button>
+        : <button class="btn primary block" onClick={(e) => { e.stopPropagation(); open('push', { metric: m }); }}>+ Assign money</button>}
       <div class="row" onClick={(e) => e.stopPropagation()}>
         <button class="btn sm ghost" onClick={() => open('pool', { pool: m })}>Edit</button>
-        <button class="btn sm ghost" onClick={() => open('quick', { mode: 'realloc', prefill: { kind: 'pool', fromId: m.id } })}>⇄ Pool transfer</button>
+        <button class="btn sm ghost" onClick={() => open('quick', { mode: 'realloc', prefill: { kind: 'pool', fromId: m.id } })}>⇄ Move money</button>
         <span class="spacer" />
         <button class="btn sm ghost danger" onClick={() => open('deletePool', { metric: m })}>Delete</button>
+      </div>
+    </div>
+  );
+}
+
+/** The zero-based budget bar: how much is left to give a job, and the next thing to do. */
+function AssignBar({ head, ws }) {
+  const { fin, open, toast } = useApp();
+  const left = head.toAssign;
+  const zero = Math.abs(left) < 0.005;
+  const fill = () => {
+    const r = fin.fillPools(ws);
+    if (!r.done.length) toast('Nothing to fill: add income first, or every pool is already filled this month.');
+    else toast(`Filled ${r.done.length} pool${r.done.length === 1 ? '' : 's'} with ${fmtMoney(r.total)}${r.short.length ? ` · not enough for all of ${r.short.join(', ')}` : ''}`);
+  };
+  const tone = left < -0.004 ? 'over' : zero ? 'done' : 'todo';
+  return (
+    <div class={`card assignbar ${tone}`} id="assignbar">
+      <div class="grow">
+        <div class="eyebrow">Left to assign</div>
+        <div class="atotal">{fmtMoney(left)}</div>
+        <div class="small">
+          {left < -0.004 ? `You've put ${fmtMoney(-left)} more into pools than you have. Take some back from a pool.`
+            : zero ? '✓ Every pound has a job. Your budget is balanced.'
+              : 'Give every pound a job: assign this to your pools until it reads £0.00.'}
+        </div>
+        {head.overspent.length > 0 && (
+          <div class="small neg" style={{ marginTop: 4 }}>⚠ Overspent: {head.overspent.map((m) => `${m.name} (${fmtMoney(-m.available)})`).join(', ')}. Tap “Cover” on the pool.</div>
+        )}
+      </div>
+      <div class="row wrap" style={{ gap: 8 }}>
+        {head.fillCount > 0 && left > 0.004 && (
+          <button class="btn primary" onClick={fill}>Fill pools · {fmtMoney(head.fillNeeded)}</button>
+        )}
+        {left > 0.004 && <button class="btn" onClick={() => open('push', {})}>Assign…</button>}
+        {left < -0.004 && <button class="btn" onClick={() => open('push', { takeBack: true })}>Take money back</button>}
       </div>
     </div>
   );
@@ -69,37 +104,34 @@ function Sector({ m, metrics }) {
   let lines = m.lines.filter((l) => filter === 'ALL' || l.defaultType === filter);
   if (sort === 'Lowest Remaining') lines = [...lines].sort((a, b) => a.remaining - b.remaining);
   if (sort === 'Highest % Used') lines = [...lines].sort((a, b) => b.pctUsed - a.pctUsed);
-  const un = m.unassigned;
   const others = fin.categories(ws).filter((c) => c.poolId !== m.id && c.defaultType !== 'Income');
   const poolNames = Object.fromEntries(pools.map((p) => [p.id, p.name]));
   const feed = fin.poolTransfers(ws, m.id);
-  const over = m.leftToSpend < -0.004;
+  const over = m.available < -0.004;
+  const planDiff = round2(m.budgetedLines - (m.fundingValue || 0));
   return (
     <div class="card" style={{ marginTop: 4 }} id="sector">
       <div class="row wrap sector-head" style={{ marginBottom: 14 }}>
         <div class="row" style={{ flex: '1 1 260px', minWidth: 0 }}>
           <div class="icon" style={{ width: 42, height: 42, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 20, background: `${m.color}22`, flex: 'none' }}>{m.icon}</div>
           <div style={{ minWidth: 0 }}>
-            <h2>{m.name} · Zero-based budget</h2>
-            <div class="muted small">{m.description || (m.isWorkspaceConnected ? 'Connected to Money at Hand' : 'Standalone pool with its own target')}</div>
+            <h2>{m.name}</h2>
+            <div class="muted small">{m.description || (m.isWorkspaceConnected ? 'Funded from your bank accounts' : 'Standalone pool: outside money')}</div>
           </div>
         </div>
-        <button class="btn" onClick={() => open('quick', { mode: 'realloc', prefill: { kind: 'category' } })}>Reallocate</button>
+        <button class="btn" onClick={() => open('quick', { mode: 'realloc', prefill: { kind: 'pool', toId: m.id } })}>⇄ Move money</button>
         <button class="btn primary" onClick={() => open('quick', { mode: 'tx', prefill: { poolId: m.id } })}>+ Log transaction</button>
       </div>
-      <div class="grid c5">
-        <Stat label="Money left to spend" value={m.leftToSpend} cls={`focal ${over ? 'over' : ''}`} sub={over ? 'Overspent: cover it below' : 'Counts down as you spend'} />
-        <Stat label="Allocated pool budget" value={m.allocatedBudget}
-          sub={m.fundingMode === 'percent' ? `${m.fundingValue}% of Money at Hand` : !m.isWorkspaceConnected ? 'Standalone target' : 'Fixed'}>
-          <button class="btn sm" style={{ marginTop: 6 }} onClick={() => open('push', { metric: m })}>+ Add cash</button>
+      <div class="grid c4">
+        <Stat label="Money in this pool" value={m.available} cls={`focal ${over ? 'over' : ''}`} sub={over ? 'Overspent: tap Cover' : 'Goes down as you spend, carries over'} />
+        <Stat label="Monthly amount" value={m.monthly} sub={m.filledThisMonth ? 'Filled this month ✓' : 'Not filled this month yet'}>
+          <button class="btn sm" style={{ marginTop: 6 }} onClick={() => open(over ? 'cover' : 'push', { metric: m })}>{over ? 'Cover' : '+ Assign'}</button>
         </Stat>
         <Stat label="Spent" value={m.spent} sub={month ? monthLabel(month) : 'All time'} />
-        <Stat label="Budgeted to categories" value={m.budgetedLines} sub={`${m.lines.length} category line${m.lines.length === 1 ? '' : 's'}`} />
-        <Stat label="Unassigned in pool" value={un} cls={Math.abs(un) < 0.005 ? '' : ''}
-          sub={Math.abs(un) < 0.005 ? 'Every pound has a job ✓' : 'Assign to lines'} />
+        <Stat label="Planned in categories" value={m.budgetedLines} sub={`${m.lines.length} categor${m.lines.length === 1 ? 'y' : 'ies'} · optional`} />
       </div>
-      {Math.abs(un) >= 0.005 && (
-        <div class="notice" style={{ marginTop: 12 }}>⚠ {fmtMoney(un)} in {m.name} isn't assigned to a category yet. Give every pound a job until Unassigned reads £0.00.</div>
+      {planDiff > 0.004 && (
+        <div class="notice" style={{ marginTop: 12 }}>Your category plans add up to {fmtMoney(planDiff)} more than this pool's monthly amount, so the monthly amount uses the category total.</div>
       )}
       <div class="row wrap sector-tools" style={{ margin: '14px 0 10px' }}>
         <Seg value={filter} onChange={setFilter} options={FILTERS} />
@@ -123,12 +155,10 @@ function Sector({ m, metrics }) {
             </div>
             <Bar pct={l.pctUsed} />
             <div class="acts">
-              <span class="small muted">Spent <Money v={l.spent} /> of</span>
+              <span class="small muted">Spent <Money v={l.spent} /> of plan</span>
               <AllocInput line={l} />
               <span class="spacer" />
-              {l.remaining < -0.004
-                ? <button class="btn sm danger" onClick={() => open('cover', { line: l, metric: m, metrics })}>Cover {fmtMoney(-l.remaining)}</button>
-                : <button class="btn sm" onClick={() => open('category', { cat: l })}>Edit</button>}
+              <button class="btn sm" onClick={() => open('category', { cat: l })}>Edit</button>
             </div>
           </div>
         ))}
@@ -137,7 +167,7 @@ function Sector({ m, metrics }) {
       <div class="tablewrap desk">
         <table class="t">
           <thead><tr>
-            <th>Category</th><th class="hide-sm">Type</th><th class="hide-sm">Pool</th><th class="money">Allocated</th><th class="money">Spent</th>
+            <th>Category</th><th class="hide-sm">Type</th><th class="hide-sm">Pool</th><th class="money">Monthly plan</th><th class="money">Spent</th>
             <th class="money">Remaining</th><th class="hide-sm" style={{ width: 140 }}>% used</th><th />
           </tr></thead>
           <tbody>
@@ -156,9 +186,7 @@ function Sector({ m, metrics }) {
                 <td class="money"><Money v={l.remaining} tone /></td>
                 <td class="hide-sm"><div class="row"><div class="grow"><Bar pct={l.pctUsed} /></div><span class={`small ${l.pctUsed > 100 ? 'neg' : 'muted'}`} style={{ width: 52, textAlign: 'right' }}>{!l.allocated && l.spent ? 'no budget' : `${Math.round(l.pctUsed)}%`}</span></div></td>
                 <td class="right nowrap">
-                  {l.remaining < -0.004
-                    ? <button class="btn sm danger" onClick={() => open('cover', { line: l, metric: m, metrics })}>Cover {fmtMoney(-l.remaining)}</button>
-                    : <button class="btn sm ghost" onClick={() => open('category', { cat: l })}>Edit</button>}
+                  <button class="btn sm ghost" onClick={() => open('category', { cat: l })}>Edit</button>
                 </td>
               </tr>
             ))}
@@ -166,14 +194,14 @@ function Sector({ m, metrics }) {
           </tbody>
         </table>
       </div>
-      <button class="btn ghost sm" style={{ marginTop: 10 }} onClick={() => setShowFeed(!showFeed)}>{showFeed ? '▾' : '▸'} Pool transfer activity ({feed.length})</button>
+      <button class="btn ghost sm" style={{ marginTop: 10 }} onClick={() => setShowFeed(!showFeed)}>{showFeed ? '▾' : '▸'} Money moves ({feed.length})</button>
       {showFeed && (
         <div class="tablewrap" style={{ marginTop: 6 }}>
           <table class="t">
             <thead><tr><th>Date</th><th>From</th><th>To</th><th class="money">Amount</th><th class="hide-sm">Note</th></tr></thead>
             <tbody>
               {feed.map((f) => <tr key={f.id}><td class="nowrap">{fmtDate(f.date)}</td><td>{f.fromPoolName}</td><td>{f.toPoolName}</td><td class="money"><Money v={f.amount} /></td><td class="hide-sm muted">{f.note}</td></tr>)}
-              {!feed.length && <tr><td colSpan={5}><Empty>No transfers in or out of this pool yet.</Empty></td></tr>}
+              {!feed.length && <tr><td colSpan={5}><Empty>No money assigned or moved yet.</Empty></td></tr>}
             </tbody>
           </table>
         </div>
@@ -221,7 +249,7 @@ export function Home() {
       <div class="page-head">
         <div class="grow">
           <h1>Budget Pools</h1>
-          <div class="sub">{workspace?.name} · zero-based budgeting · {month ? monthLabel(month) : 'All time'}</div>
+          <div class="sub">{workspace?.name} · zero-based budget · {month ? monthLabel(month) : 'All time'}</div>
         </div>
         <MonthBar />
       </div>
@@ -232,11 +260,10 @@ export function Home() {
             <div class="b-sub">GBP · across {accounts} bank account{accounts === 1 ? '' : 's'}</div>
             <div class={`mah ${head.moneyAtHand < 0 ? 'neg' : ''}`}>{fmtMoney(head.moneyAtHand)}</div>
             <div class="kpis">
-              <div><div class="k">In pools</div><div class="v">{fmtMoney(head.assigned)}</div></div>
-              <div><div class="k">Unpooled</div><div class={`v ${head.unpooled > 0 ? 'warn' : ''}`}>{fmtMoney(head.unpooled)}</div></div>
-              <div><div class="k">Standalone</div><div class="v">{fmtMoney(head.standalone)}</div></div>
+              <div><div class="k">In pools</div><div class="v">{fmtMoney(head.inPools)}</div></div>
+              <div><div class="k">Left to assign</div><div class={`v ${Math.abs(head.toAssign) > 0.004 ? 'warn' : ''}`}>{fmtMoney(head.toAssign)}</div></div>
+              {Math.abs(head.standalone) > 0.004 && <div><div class="k">Standalone</div><div class="v">{fmtMoney(head.standalone)}</div></div>}
             </div>
-            {head.unpooled > 0.004 && <div class="hint">{fmtMoney(head.unpooled)} of cash isn't in a pool yet.</div>}
           </div>
           <div class="actions">
             <button onClick={() => open('quick', { mode: 'tx' })}><span class="ib"><Icon name="plus" /></span>Add</button>
@@ -274,7 +301,9 @@ export function Home() {
         </div>
       </div>
 
-      <div class="card flat" style={{ padding: 8, borderRadius: 999 }}>
+      <AssignBar head={head} ws={ws} />
+
+      <div class="card flat" style={{ padding: 8, borderRadius: 999, marginTop: 16 }}>
         <input type="search" style={{ borderRadius: 999, background: 'transparent' }} placeholder="🔍  Find a category across all pools…" value={q} onInput={(e) => setQ(e.currentTarget.value)} />
         {q.trim() && (
           <div class="col" style={{ marginTop: 8, gap: 6 }}>
@@ -293,7 +322,7 @@ export function Home() {
       </div>
 
       <div class="pools">
-        {metrics.map((m) => <PoolCard key={m.id} m={m} active={cur && cur.id === m.id} onPick={() => pick(m.id)} />)}
+        {metrics.map((m) => <PoolCard key={m.id} m={m} month={month} active={cur && cur.id === m.id} onPick={() => pick(m.id)} />)}
       </div>
       {cur && <Sector m={cur} metrics={metrics} />}
     </div>

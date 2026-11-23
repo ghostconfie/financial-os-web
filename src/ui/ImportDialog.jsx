@@ -102,7 +102,7 @@ export function ImportDialog({ onClose }) {
       {err && <div class="notice rose" style={{ marginBottom: 10 }}>{err}</div>}
       {backup && (
         <div class="notice neutral row wrap" style={{ marginBottom: 10 }}>
-          <span class="grow">This is a Financial OS backup file. To bring back everything exactly as it was, restore it instead of importing.</span>
+          <span class="grow">This is an Emperio Finances backup file. To bring back everything exactly as it was, restore it instead of importing.</span>
           <button type="button" class="btn sm primary" onClick={() => { onClose(); open('restore', { file }); }}>Restore backup instead</button>
         </div>
       )}

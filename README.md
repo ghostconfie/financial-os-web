@@ -1,6 +1,6 @@
-# Financial OS (web)
+# Emperio Finances (web)
 
-Financial OS as a web app you can open on any phone or computer. It has the same money rules as the desktop app:
+Emperio Finances (formerly Financial OS) is a web app you can open on any phone or computer. It has the same money rules as the desktop app:
 Budget Pools home, bank accounts, all transactions, Calendar & P&L, categories and goals, bills, the Director's
 Loan Account, analysis, the smart spreadsheet importer, and a full Excel backup you can restore anywhere.
 
@@ -69,3 +69,11 @@ Free-plan notes: after the first download each device only fetches records chang
 full refresh happens at most once a week, so normal use stays far inside Firestore's free 50,000 reads a day.
 Bill reminders show while the app is open (in-app, plus a notification if you allow it); a closed web app can't
 wake itself up without a paid server.
+
+## Zero-based budgeting with pools
+
+- **Left to assign** = Money at hand − money sitting in connected pools. The goal is £0.00.
+- **Assign** moves money from Left to assign into a pool; spending takes it out of the pool; income raises Left to assign.
+- Unspent pool money carries over. Each pool has a **monthly amount**; **Fill pools** gives each pool that amount once a month.
+- Pools from older versions keep their old budget as starting money (`migrateBudgets`). Backups gained the columns Money Put In, Budget Start and Filled Month; older backups still restore.
+- Logo: `public/logo.svg`. Regenerate icons with `node scripts/make-icons.mjs`.

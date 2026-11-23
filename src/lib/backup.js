@@ -9,7 +9,8 @@ import { SCHEMA, TABLES, clean } from './store.js';
 import { TX_TYPES, newId, nowIso, parseAmount, parseBool, parseDate, round2 } from './util.js';
 
 const XLSX = XLSXns.utils ? XLSXns : XLSXns.default;
-export const BACKUP_MARK = 'Financial OS backup';
+export const BACKUP_MARK = 'Emperio Finances backup';
+const OLD_MARKS = ['Financial OS backup']; // backups made before the rename still restore
 export const BACKUP_VERSION = 1;
 
 const yes = (b) => (b ? 'Yes' : 'No');
@@ -46,6 +47,9 @@ const SHEETS = [
     ['Connected to Money at Hand', 'bool', (r) => r.isWorkspaceConnected, 'isWorkspaceConnected'],
     ['Funding Mode', 'text', (r) => r.fundingMode, 'fundingMode'],
     ['Funding Value', 'num', (r) => r.fundingValue, 'fundingValue'],
+    ['Money Put In', 'money', (r) => r.funded, 'funded'],
+    ['Budget Start', 'date', (r) => r.budgetStart, 'budgetStart'],
+    ['Filled Month', 'text', (r) => r.filledMonth, 'filledMonth'],
     ['Default Pool', 'bool', (r) => r.isDefault, 'isDefault'],
     ['Order', 'int', (r) => r.order, 'order'],
     ['Description', 'text', (r) => r.description, 'description'],
@@ -178,8 +182,8 @@ export function buildBackup(store) {
     ['Saved', nowIso()],
     [],
     ['What this file is'],
-    ['A complete copy of everything in Financial OS: every workspace, account, transaction, transfer, category, pool, bill and goal.'],
-    ['To restore: open Financial OS, choose Menu → Restore from Excel backup, and pick this file.'],
+    ['A complete copy of everything in Emperio Finances: every workspace, account, transaction, transfer, category, pool, bill and goal.'],
+    ['To restore: open Emperio Finances, choose Menu → Restore from Excel backup, and pick this file.'],
     ['You can edit it in Excel. Keep the sheet names and the header row. Leave ID blank for new rows.'],
     ['Workspace, Pool and Account columns use names, so they must match the names on the other sheets.'],
     ['Amounts in Transactions: income is positive, spending is negative (the sign is fixed from Type on restore).'],
@@ -198,15 +202,15 @@ export function backupBytes(store) {
 }
 
 export function backupFileName() {
-  return `Financial OS backup ${nowIso().slice(0, 10)}.xlsx`;
+  return `Emperio Finances backup ${nowIso().slice(0, 10)}.xlsx`;
 }
 
-/** Is this workbook (bytes) a Financial OS backup? */
+/** Is this workbook (bytes) an Emperio Finances (or older Financial OS) backup? */
 export function isBackup(buf) {
   try {
     const wb = XLSX.read(buf, { type: 'array', sheetRows: 2 });
     const a = wb.Sheets.About;
-    return !!(a && a.A1 && String(a.A1.v).trim() === BACKUP_MARK) || SHEETS.every(([n]) => wb.SheetNames.includes(n));
+    return !!(a && a.A1 && [BACKUP_MARK, ...OLD_MARKS].includes(String(a.A1.v).trim())) || SHEETS.every(([n]) => wb.SheetNames.includes(n));
   } catch {
     return false;
   }
@@ -297,6 +301,9 @@ export function readBackup(buf) {
       id: r.id || newId(), workspaceId: w, name: r.name, icon: r.icon || '💷', color: r.color || '#6366f1',
       isWorkspaceConnected: r.isWorkspaceConnected, fundingMode: r.isWorkspaceConnected ? (mode === 'unconnected' ? 'fixed' : mode) : 'unconnected',
       fundingValue: r.fundingValue, isDefault: r.isDefault, order: r.order, description: r.description,
+      // older backups have no budget start: the app then keeps each pool's old budget as its starting money
+      funded: r.budgetStart ? r.funded : 0, budgetStart: r.budgetStart || null,
+      filledMonth: /^\d{4}-\d{2}$/.test(r.filledMonth || '') ? r.filledMonth : null,
     };
     out.budget_pools.push(p);
     poolByKey.set(`${w}|${p.name.toLowerCase()}`, p);
@@ -387,7 +394,7 @@ export function readBackup(buf) {
     out[t] = out[t].map((r) => clean(t, { ...r, createdAt: r.createdAt || nowIso(), updatedAt: nowIso() }));
   }
   const counts = Object.fromEntries(SHEETS.map(([name, table]) => [name, out[table].length]));
-  if (!out.workspaces.length) problems.unshift('No workspaces found: this does not look like a Financial OS backup.');
+  if (!out.workspaces.length) problems.unshift('No workspaces found: this does not look like an Emperio Finances backup.');
   return { data: out, problems, counts };
 }
 

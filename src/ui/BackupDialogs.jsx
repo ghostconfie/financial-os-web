@@ -24,7 +24,7 @@ export function BackupDialog({ onClose }) {
   const n = (t) => fin.db.all(t).length;
   return (
     <Modal title="Back up everything to Excel" onClose={onClose} submitLabel="Download backup"
-      sub="One Excel file with every workspace, account, transaction, transfer, category, pool, bill and goal. You can open and edit it in Excel, and restore it into any copy of Financial OS to get everything back exactly."
+      sub="One Excel file with every workspace, account, transaction, transfer, category, pool, bill and goal. You can open and edit it in Excel, and restore it into any copy of Emperio Finances to get everything back exactly."
       onSubmit={() => { const name = saveBackup(fin.db); toast(`Saved ${name}`); }}>
       <div class="strip small">
         {fin.workspaces().length} workspaces · {n('bank_accounts')} accounts · {n('transactions')} transactions · {n('transfers')} transfers ·
@@ -120,7 +120,7 @@ export function SettingsDialog({ onClose }) {
             action: () => { const id = loadDemo(fin); setWs(id); toast('Demo data loaded'); onClose(); },
           })}>Load demo data</button>
         </div>
-        <div class="small faint">Financial OS web v{__APP_VERSION__}</div>
+        <div class="small faint">Emperio Finances v{__APP_VERSION__}</div>
       </div>
     </Modal>
   );

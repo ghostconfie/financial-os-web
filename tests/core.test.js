@@ -13,6 +13,7 @@ const XLSX = XLSXns.utils ? XLSXns : XLSXns.default;
 let fin;
 const wsId = (name = 'Personal') => fin.workspaces().find((w) => w.name === name).id;
 const mk = () => monthKey();
+const round = (v) => Math.round(v * 100) / 100;
 const csvBuf = (rows) => new TextEncoder().encode(rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n')).buffer;
 const parse = (ws, name, buf) => imp.buildRows(fin, ws, imp.detectFile(name, buf)[0]);
 const xlsxBuf = (wb) => XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -45,30 +46,72 @@ describe('money rules (same as desktop)', () => {
     expect(fin.moneyAtHand(ws)).toBeCloseTo(1060);
   });
 
-  it('pool budget is explicit, never auto-filled', () => {
+  it('zero-based: every pound of money at hand gets assigned to a pool', () => {
     const ws = wsId();
     fin.saveAccount(ws, 'Current Account', 5000, fin.accounts(ws)[0].id);
-    let m = fin.poolMetrics(ws, mk())[0];
-    expect(m.allocatedBudget).toBe(0);
-    fin.pushFunds(m.id, 300);
-    fin.setCategoryAllocated(fin.categoryByName(ws, 'Groceries').id, 450);
-    m = fin.poolMetrics(ws, mk())[0];
-    expect(m.allocatedBudget).toBe(450);
-    expect(m.unassigned).toBe(0);
-    const h = fin.header(ws, mk());
-    expect(h.assigned).toBe(450);
-    expect(h.unpooled).toBe(4550);
+    const pool = fin.defaultPool(ws);
+    let h = fin.header(ws, mk());
+    expect(h.toAssign).toBe(5000);
+    fin.assign(pool.id, 300);
+    h = fin.header(ws, mk());
+    expect(h.inPools).toBe(300);
+    expect(h.toAssign).toBe(4700);
+    expect(() => fin.assign(pool.id, 4700.01)).toThrow(FinanceError);
+    fin.assign(pool.id, 4700);
+    expect(fin.header(ws, mk()).toAssign).toBe(0);
+    fin.assign(pool.id, -200);
+    expect(fin.header(ws, mk()).toAssign).toBe(200);
   });
 
-  it('left to spend counts down and is month scoped', () => {
+  it('spending comes out of the pool, not out of left to assign; income adds to it', () => {
     const ws = wsId();
-    fin.setPoolBudget(fin.defaultPool(ws).id, 500);
-    fin.saveTransaction({ workspaceId: ws, date: `${mk()}-01`, type: 'Expense', category: 'Groceries', bankAccount: 'Current Account', amount: 120 });
+    const pool = fin.defaultPool(ws);
+    fin.saveTransaction({ workspaceId: ws, date: `${mk()}-01`, type: 'Income', category: 'Salary', bankAccount: 'Current Account', amount: 1000 });
+    fin.assign(pool.id, 500);
+    fin.saveTransaction({ workspaceId: ws, date: `${mk()}-02`, type: 'Expense', category: 'Groceries', bankAccount: 'Current Account', amount: 120 });
     fin.saveTransaction({ workspaceId: ws, date: '2020-01-05', type: 'Expense', category: 'Groceries', bankAccount: 'Current Account', amount: 30 });
     const m = fin.poolMetrics(ws, mk())[0];
     expect(m.spent).toBe(120);
-    expect(m.leftToSpend).toBe(380);
+    expect(m.available).toBe(380);
     expect(fin.poolMetrics(ws, null)[0].spent).toBe(150);
+    const h = fin.header(ws, mk());
+    expect(h.moneyAtHand).toBe(850);
+    expect(h.toAssign).toBe(470); // 850 − 380: the old 2020 spend was before budgeting started
+    expect(round(h.inPools + h.toAssign)).toBe(h.moneyAtHand);
+  });
+
+  it('fill pools gives each pool its monthly amount once a month', () => {
+    const ws = wsId();
+    fin.saveAccount(ws, 'Current Account', 1000, fin.accounts(ws)[0].id);
+    const a = fin.defaultPool(ws);
+    fin.savePool(ws, { id: a.id, name: a.name, fundingValue: 400 });
+    const b = fin.savePool(ws, { name: 'Bills', isWorkspaceConnected: true, fundingValue: 800 });
+    const r = fin.fillPools(ws);
+    expect(r.total).toBe(1000);
+    expect(r.short).toEqual(['Bills']);
+    const ms = Object.fromEntries(fin.poolMetrics(ws, mk()).map((m) => [m.name, m]));
+    expect(ms['Everyday Spending'].available).toBe(400);
+    expect(ms.Bills.available).toBe(600);
+    expect(fin.header(ws).toAssign).toBe(0);
+    expect(fin.fillPools(ws).total).toBe(0);
+    expect(b.budgetStart).toBe(`${mk()}-01`);
+  });
+
+  it('old pools keep their budget as starting money (no data lost)', () => {
+    const ws = wsId();
+    const p = fin.defaultPool(ws);
+    // what older versions saved: no budgetStart, a % budget and category lines
+    fin.db.update('budget_pools', p.id, { budgetStart: null, funded: 0, fundingMode: 'fixed', fundingValue: 300 });
+    fin.setCategoryAllocated(fin.categoryByName(ws, 'Groceries').id, 450);
+    fin.saveTransaction({ workspaceId: ws, date: `${mk()}-02`, type: 'Expense', category: 'Groceries', bankAccount: 'Current Account', amount: 100 });
+    const before = fin.poolMetrics(ws, mk())[0];
+    expect(before.available).toBe(350); // old "left to spend": 450 − 100
+    expect(fin.migrateBudgets()).toBe(1);
+    const after = fin.poolMetrics(ws, mk())[0];
+    expect(after.available).toBe(350);
+    expect(after.budgetStart).toBe(`${mk()}-01`);
+    expect(after.filledThisMonth).toBe(true);
+    expect(fin.migrateBudgets()).toBe(0);
   });
 
   it('moving a category moves its spending', () => {
@@ -84,18 +127,28 @@ describe('money rules (same as desktop)', () => {
 
   it('pool transfer, cover overspend and delete pool', () => {
     const ws = wsId();
+    fin.saveAccount(ws, 'Current Account', 1000, fin.accounts(ws)[0].id);
     const a = fin.defaultPool(ws);
-    const b = fin.savePool(ws, { name: 'Spare', isWorkspaceConnected: true, fundingMode: 'fixed', fundingValue: 200 });
-    const groc = fin.categoryByName(ws, 'Groceries');
-    fin.setCategoryAllocated(groc.id, 50);
-    fin.saveTransaction({ workspaceId: ws, date: `${mk()}-03`, type: 'Expense', category: 'Groceries', bankAccount: 'Current Account', amount: 80 });
-    expect(fin.coverOverspend(groc.id, 'pool', b.id, mk())).toBe(30);
-    const line = fin.poolMetrics(ws, mk())[0].lines.find((l) => l.name === 'Groceries');
-    expect(line.remaining).toBe(0);
+    const b = fin.savePool(ws, { name: 'Spare', isWorkspaceConnected: true, fundingValue: 200 });
+    fin.assign(a.id, 50);
+    fin.assign(b.id, 200);
+    fin.poolTransfer(ws, b.id, a.id, 20);
+    expect(() => fin.poolTransfer(ws, b.id, a.id, 500)).toThrow(FinanceError);
+    fin.saveTransaction({ workspaceId: ws, date: `${mk()}-03`, type: 'Expense', category: 'Groceries', bankAccount: 'Current Account', amount: 100 });
+    let ms = Object.fromEntries(fin.poolMetrics(ws, mk()).map((m) => [m.name, m]));
+    expect(ms['Everyday Spending'].available).toBe(-30);
+    expect(fin.header(ws).overspent.map((m) => m.name)).toEqual(['Everyday Spending']);
+    expect(fin.coverPool(a.id, b.id)).toBe(30);
+    ms = Object.fromEntries(fin.poolMetrics(ws, mk()).map((m) => [m.name, m]));
+    expect(ms['Everyday Spending'].available).toBe(0);
+    expect(ms.Spare.available).toBe(150);
     expect(() => fin.deletePool(a.id, null)).toThrow(FinanceError);
-    fin.deletePool(a.id, b.id);
-    expect(fin.categoryByName(ws, 'Groceries').poolId).toBe(b.id);
-    expect(fin.defaultPool(ws).id).toBe(b.id);
+    const left = fin.header(ws).toAssign;
+    fin.deletePool(b.id, a.id);
+    expect(fin.poolMetrics(ws, mk())[0].available).toBe(150);
+    expect(fin.header(ws).toAssign).toBe(left);
+    expect(fin.categoryByName(ws, 'Groceries').poolId).toBe(a.id);
+    expect(fin.defaultPool(ws).id).toBe(a.id);
   });
 
   it('bill status and reminders', () => {
@@ -369,6 +422,7 @@ describe('Excel backup', () => {
     expect(JSON.stringify(f2.poolMetrics(ws, mk()).map((m) => [m.name, m.leftToSpend, m.lines.length])))
       .toBe(JSON.stringify(fin.poolMetrics(ws, mk()).map((m) => [m.name, m.leftToSpend, m.lines.length])));
     expect(f2.dlaBalance()).toBe(fin.dlaBalance());
+    expect(f2.header(ws).toAssign).toBe(fin.header(ws).toAssign);
   });
 
   it('accepts rows added by hand in Excel (no IDs, text dates)', () => {

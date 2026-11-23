@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="35%" cy="28%" r="85%">
+      <stop offset="0" stop-color="#2b2519"/>
+      <stop offset=".55" stop-color="#121110"/>
+      <stop offset="1" stop-color="#050505"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbeaa0"/>
+      <stop offset=".3" stop-color="#e2bd5c"/>
+      <stop offset=".55" stop-color="#a87b26"/>
+      <stop offset=".8" stop-color="#e9c96c"/>
+      <stop offset="1" stop-color="#b68a32"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="172" fill="none" stroke="url(#gold)" stroke-width="7"/>
+  <circle cx="256" cy="256" r="158" fill="none" stroke="url(#gold)" stroke-width="1.8" opacity=".8"/>
+  <g fill="url(#gold)">
+    <path d="M226 174 L221 153 L240 165 L256 146 L272 165 L291 153 L286 174 Z"/>
+    <rect x="226" y="176" width="60" height="6" rx="1.5"/>
+    <circle cx="221" cy="151" r="4.2"/><circle cx="256" cy="144" r="4.6"/><circle cx="291" cy="151" r="4.2"/>
+    <path transform="translate(256 196) scale(.885) translate(-259 -166)"
+      d="M192 166 L318 166 L318 206 L312 206 C309 194 304 184 294 181 L244 181 L244 254 L282 254 C287 252 289 246 290 240 L296 240 L296 280 L290 280 C289 274 287 268 282 266 L244 266 L244 343 L300 343 C312 341 318 330 320 312 L326 312 L326 358 L192 358 L192 352 C204 351 213 349 214 341 L214 183 C213 175 204 173 192 172 Z"/>
+  </g>
+</svg>

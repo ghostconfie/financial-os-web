@@ -398,7 +398,7 @@ export function Bills() {
           </tbody>
         </table>
       </div>
-      <p class="small muted">Reminders show inside the app (and as a phone or computer notification if you allow it) on the due day at the reminder time, while Financial OS is open.</p>
+      <p class="small muted">Reminders show inside the app (and as a phone or computer notification if you allow it) on the due day at the reminder time, while Emperio Finances is open.</p>
     </div>
   );
 }
