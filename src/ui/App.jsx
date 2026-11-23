@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { fmtMoney, monthKey } from '../lib/util.js';
-import { Ctx } from './components.jsx';
+import { Ctx, Icon } from './components.jsx';
 import { Home } from './Home.jsx';
 import { Accounts, Analysis, Bills, Calendar, Categories, DLA, Transactions } from './Tools.jsx';
 import {
@@ -32,7 +32,8 @@ const TABS = [
   ['categories', 'Categories', '◆'], ['bills', 'Bills', '🧾'], ['dla', "Director's Loan", '💼'], ['analysis', 'Analysis', '📊'],
 ];
 const VIEWS = { home: Home, accounts: Accounts, tx: Transactions, calendar: Calendar, categories: Categories, bills: Bills, dla: DLA, analysis: Analysis };
-const BOTTOM = ['home', 'tx', 'accounts', 'bills'];
+const BOTTOM = ['home', 'tx', 'bills'];
+const NAV_ICON = { home: 'home', tx: 'list', bills: 'bill' };
 
 const ls = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -42,7 +43,7 @@ const ls = {
 function applyTheme(t) {
   const dark = t === 'dark' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0a0d12' : '#fafafa');
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0c1511' : '#d4ece2');
 }
 
 export function App({ fin, sync: initialSync, onStatus }) {
@@ -134,13 +135,23 @@ export function App({ fin, sync: initialSync, onStatus }) {
     </>
   );
 
+  const navBtn = (k) => {
+    const t = TABS.find((x) => x[0] === k);
+    return (
+      <button key={k} class={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
+        <Icon name={NAV_ICON[k]} />{k === 'home' ? 'Pools' : t[1]}
+        {k === 'bills' && pendingBills > 0 && <span class="count">{pendingBills}</span>}
+      </button>
+    );
+  };
+
   return (
     <Ctx.Provider value={ctx}>
       <div class="app">
         <header class="topbar">
           <div class="topbar-in">
             <div class="brand"><img src="icons/icon-192.png" alt="" /><span class="hide-sm">Financial OS</span></div>
-            <select aria-label="Workspace" style={{ width: 'auto', maxWidth: 220, fontWeight: 600 }} value={ws} onChange={(e) => {
+            <select aria-label="Workspace" class="wspill" value={ws} onChange={(e) => {
               const v = e.currentTarget.value;
               if (v === '__manage') { e.currentTarget.value = ws; open('workspaces'); } else setWs(v);
             }}>
@@ -149,24 +160,25 @@ export function App({ fin, sync: initialSync, onStatus }) {
             </select>
             <span class="spacer" />
             <span class="sync" title={sync.label}><span class={`dot ${dot}`} /><span class="hide-sm">{sync.state === 'ok' || sync.state === 'synced' ? (sync.mode === 'cloud' ? 'Synced' : 'This device') : sync.state === 'busy' ? 'Saving…' : sync.state === 'offline' ? 'Offline' : 'Problem'}</span></span>
-            <button class="btn primary hide-sm" onClick={() => open('quick', { mode: 'tx' })}>+ Quick add</button>
+            <button class="btn primary hide-sm" onClick={() => open('quick', { mode: 'tx' })}><Icon name="plus" size={16} /> Quick add</button>
             <div style={{ position: 'relative' }}>
-              <button class="iconbtn" aria-label="Menu" onClick={() => setMenu(!menu)}>☰</button>
-              {menu && <div class="menu" onMouseLeave={() => setMenu(false)}>{menuItems}</div>}
+              <button class="iconbtn" aria-label="Menu" onClick={() => setMenu(!menu)}><Icon name="menu" /></button>
+              {menu === true && <div class="menu" onMouseLeave={() => setMenu(false)}>{menuItems}</div>}
             </div>
           </div>
-          <nav class="tabs">
+          <nav class="tabs"><div class="tabs-in">
             {TABS.map(([k, l]) => (
               <button key={k} class={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}{k === 'bills' && pendingBills > 0 && <span class="count">{pendingBills}</span>}</button>
             ))}
-          </nav>
+          </div></nav>
         </header>
         {sync.state === 'error' && <div class="notice rose" style={{ margin: '10px auto 0', maxWidth: 1240 }}>{sync.label}</div>}
         <main><View key={ws} /></main>
-        <button class="fab" aria-label="Quick add" onClick={() => open('quick', { mode: 'tx' })}>＋</button>
         <nav class="bottomnav">
-          {BOTTOM.map((k) => { const t = TABS.find((x) => x[0] === k); return <button key={k} class={tab === k ? 'on' : ''} onClick={() => setTab(k)}><span class="i">{t[2]}</span>{k === 'home' ? 'Pools' : t[1]}</button>; })}
-          <button class={!BOTTOM.includes(tab) ? 'on' : ''} onClick={() => setMenu('more')}><span class="i">⋯</span>More</button>
+          {BOTTOM.slice(0, 2).map((k) => navBtn(k))}
+          <button class="add" aria-label="Quick add" onClick={() => open('quick', { mode: 'tx' })}><Icon name="plus" /></button>
+          {BOTTOM.slice(2).map((k) => navBtn(k))}
+          <button class={!BOTTOM.includes(tab) ? 'on' : ''} onClick={() => setMenu('more')}><Icon name="more" />More</button>
         </nav>
         {menu === 'more' && (
           <div class="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setMenu(false); }}>

@@ -377,13 +377,13 @@ export function WorkspaceDialog({ onClose }) {
     <Modal title="Workspaces" sub="Each workspace has its own accounts, pools, categories and bills. Business workspaces can receive DLA payments." onClose={onClose} noSubmit>
       <div class="col" style={{ gap: 6 }}>
         {list.map((w) => (
-          <div class="strip row" key={w.id}>
+          <div class="strip row wrap" key={w.id}>
             {edit && edit.id === w.id ? <>
               <input type="text" value={edit.name} onInput={(e) => setEdit({ ...edit, name: e.currentTarget.value })} />
               <select style={{ width: 130 }} value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.currentTarget.value })}><option value="personal">Personal</option><option value="business">Business</option></select>
               <button type="button" class="btn sm primary" onClick={() => { try { fin.renameWorkspace(w.id, edit.name, edit.kind); setEdit(null); } catch (ex) { alert(ex.message); } }}>Save</button>
             </> : <>
-              <b class="grow">{w.name}</b><span class="pill">{w.kind === 'business' ? 'Business' : 'Personal'}</span>
+              <div class="row" style={{ flex: '1 1 150px', minWidth: 0 }}><b class="grow" style={{ overflowWrap: 'anywhere' }}>{w.name}</b><span class="pill">{w.kind === 'business' ? 'Business' : 'Personal'}</span></div>
               {w.id === ws ? <span class="pill emerald">Open</span> : <button type="button" class="btn sm" onClick={() => { setWs(w.id); onClose(); }}>Open</button>}
               <button type="button" class="btn sm ghost" onClick={() => setEdit({ id: w.id, name: w.name, kind: w.kind })}>Rename</button>
               <button type="button" class="btn sm ghost danger" disabled={list.length <= 1} onClick={() => open('confirm', {

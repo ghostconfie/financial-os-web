@@ -213,3 +213,49 @@ export function useDebounced(value, ms = 200) {
   useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value]);
   return v;
 }
+
+// Simple line icons (stroke uses the current text colour).
+const ICONS = {
+  plus: 'M12 5v14M5 12h14',
+  transfer: 'M7 7h11l-3-3M17 17H6l3 3',
+  pool: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  upload: 'M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
+  home: 'M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z',
+  list: 'M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01',
+  bank: 'M3 9.5 12 4l9 5.5M5 10v7M9.5 10v7M14.5 10v7M19 10v7M3.5 20h17',
+  bill: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+  menu: 'M4 7h16M4 12h16M4 17h16',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+  filter: 'M4 6h16M7 12h10M10 18h4',
+};
+export function Icon({ name, size }) {
+  return <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style={size ? { width: size, height: size } : undefined}><path d={ICONS[name]} /></svg>;
+}
+
+/** Round coloured circle with the first letter of a name (stands in for a logo). */
+export function Avatar({ name, color, small }) {
+  const ch = (String(name || '?').trim().match(/[A-Za-z0-9]/) || ['£'])[0].toUpperCase();
+  return <span class={`avatar ${small ? 'sm' : ''}`} style={{ background: color || '#6b7280' }}>{ch}</span>;
+}
+
+/** A transaction as a rounded row: avatar, description, details and a green/red amount. */
+export function TxRow({ t, color, sub, onClick, selected, children }) {
+  return (
+    <div class={`txrow ${selected ? 'sel' : ''}`} onClick={onClick}>
+      {children}
+      <Avatar name={t.description || t.category} color={color} />
+      <div class="grow">
+        <div class="t1">{t.description || t.category}</div>
+        <div class="t2">{sub}</div>
+      </div>
+      <span class={`money amt ${t.amount < -0.004 ? 'neg' : t.amount > 0.004 ? 'pos' : ''}`}>{fmtMoney(t.amount, true)}</span>
+    </div>
+  );
+}
+
+/** Category name → colour, for avatars. */
+export function useCatColors() {
+  const { fin, ws, version } = useApp();
+  return useMemo(() => Object.fromEntries(fin.categories(ws).map((c) => [c.name.toLowerCase(), c.color])), [version, ws]);
+}
