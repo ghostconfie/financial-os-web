@@ -94,7 +94,7 @@ export function ImportDialog({ onClose }) {
         <button type="button" class="btn primary" disabled={!included || busy} onClick={run}>{busy ? 'Importing…' : `Import ${included} row${included === 1 ? '' : 's'}`}</button>
       </> : null}>
       <div class="row wrap" style={{ marginBottom: 12 }}>
-        <input type="file" accept=".csv,.txt,.xlsx,.xlsm,.xls,.ods,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+        <input type="file" accept=".csv,.tsv,.tab,.txt,.xlsx,.xlsm,.xlsb,.xltx,.xltm,.xls,.ods,.fods,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
           onChange={(e) => pick(e.currentTarget.files[0])} style={{ flex: '2 1 260px' }} />
         <span class="muted">into</span>
         <div style={{ flex: '1 1 200px' }}><Select value={target} onChange={setTarget} options={fin.workspaces().map((w) => [w.id, w.name])} /></div>
@@ -150,6 +150,12 @@ export function ImportDialog({ onClose }) {
                   </label>
                 ))}
               </div>
+              {t.section === 'transactions' && (
+                <label class="row small" style={{ gap: 8, marginTop: 10 }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={!!t.flip} onChange={(e) => { t.flip = e.currentTarget.checked; setExcluded({}); setRev(rev + 1); }} />
+                  Spending shows as plus and income as minus in this file (common in credit card exports) — swap them
+                </label>
+              )}
             </div>
           );
         })()}

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "postinstall": "node scripts/patch-xlsx.mjs"
   },
   "dependencies": {
     "firebase": "^13.4.0",

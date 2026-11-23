@@ -247,6 +247,109 @@ describe('importer (same cases as desktop)', () => {
   });
 });
 
+describe('importer: any spreadsheet', () => {
+  const tx = (rows) => rows.filter((r) => r.section === 'transactions').map((r) => [r.data.date, r.data.type, r.data.amount]);
+  const aoaBook = (sheets, bookType = 'xlsx') => {
+    const wb = XLSX.utils.book_new();
+    for (const [n, aoa, opts] of sheets) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, opts), n);
+    return XLSX.write(wb, { type: 'array', bookType });
+  };
+
+  it('loose dates and amounts', () => {
+    const d = { '1-Nov-26': '2026-11-01', 'Nov 1, 2026': '2026-11-01', 'November 1 2026': '2026-11-01', '1st November 2026': '2026-11-01',
+      'Mon 3 Nov 2026': '2026-11-03', '2026-11-01T10:20:30Z': '2026-11-01', '2026.11.01': '2026-11-01', '03/11/2026 14:05:00': '2026-11-03',
+      '25/11/2026 2:05 PM': '2026-11-25', '11/25/2026': '2026-11-25', '03.11.26': '2026-11-03', '3 Sept 2026': '2026-09-03', '20261101': '2026-11-01' };
+    for (const [k, v] of Object.entries(d)) expect(parseDate(k), k).toBe(v);
+    for (const bad of ['foo', '12.50', '31/31/2026', '']) expect(parseDate(bad), bad).toBeNull();
+    const a = { 'GBP 12.50': 12.5, '−5.00': -5, '5.00-': -5, '£-5': -5, '-£5': -5, '+3.20': 3.2, '12.50 CR': 12.5, '12.50DR': -12.5, '€1,234.56': 1234.56, '(4.00)': -4 };
+    for (const [k, v] of Object.entries(a)) expect(parseAmount(k), k).toBe(v);
+    expect(parseAmount('abc')).toBeNull();
+  });
+
+  it('UK bank and card export layouts', () => {
+    const ws = wsId();
+    const cases = {
+      starling: [['Date', 'Counter Party', 'Reference', 'Type', 'Amount (GBP)', 'Balance (GBP)', 'Spending Category', 'Notes'],
+        ['01/11/2026', 'Tesco', 'TESCO STORES', 'CONTACTLESS', '-12.40', '87.60', 'GROCERIES', ''],
+        ['02/11/2026', 'Client', 'INV 4', 'FASTER PAYMENT', '250.00', '337.60', 'INCOME', '']],
+      revolut: [['Type', 'Product', 'Started Date', 'Completed Date', 'Description', 'Amount', 'Fee', 'Currency', 'State', 'Balance'],
+        ['CARD_PAYMENT', 'Current', '2026-11-01 10:20:30', '2026-11-02 08:00:00', 'Pret', '-4.50', '0.00', 'GBP', 'COMPLETED', '95.50'],
+        ['TOPUP', 'Current', '2026-11-03 09:00:00', '2026-11-03 09:00:01', 'Top-up', '100.00', '0.00', 'GBP', 'COMPLETED', '195.50']],
+      barclays: [['Number', 'Date', 'Account', 'Amount', 'Subcategory', 'Memo'],
+        ['', '01/11/2026', '20-00-00 12345678', '-30.00', 'Direct Debit', 'GYM'],
+        ['', '02/11/2026', '20-00-00 12345678', '1500.00', 'Credit', 'SALARY']],
+      hsbc: [['01 Nov 2026', 'AMAZON MARKETPLACE', '-19.99'], ['02 Nov 2026', 'PAYROLL', '1,200.00']],
+      nationwide: [['Account Name:', 'FlexAccount ****1234'], ['Account Balance:', '£1,000.00'], ['Available Balance: ', '£1,000.00'], [],
+        ['Date', 'Transaction type', 'Description', 'Paid out', 'Paid in', 'Balance'],
+        ['01 Nov 2026', 'Contactless Payment', 'COSTA', '£3.10', '', '£996.90'],
+        ['02 Nov 2026', 'Bank credit', 'WAGES', '', '£800.00', '£1,796.90']],
+      lloyds: [['Transaction Date', 'Transaction Type', 'Sort Code', 'Account Number', 'Transaction Description', 'Debit Amount', 'Credit Amount', 'Balance'],
+        ['01/11/2026', 'DEB', "'30-00-00", '12345678', 'SAINSBURYS', '22.15', '', '977.85'],
+        ['02/11/2026', 'FPI', "'30-00-00", '12345678', 'REFUND', '', '10.00', '987.85']],
+    };
+    const want = {
+      starling: [['2026-11-01', 'Expense', 12.4], ['2026-11-02', 'Income', 250]],
+      revolut: [['2026-11-01', 'Expense', 4.5], ['2026-11-03', 'Income', 100]],
+      barclays: [['2026-11-01', 'Expense', 30], ['2026-11-02', 'Income', 1500]],
+      hsbc: [['2026-11-01', 'Expense', 19.99], ['2026-11-02', 'Income', 1200]],
+      nationwide: [['2026-11-01', 'Expense', 3.1], ['2026-11-02', 'Income', 800]],
+      lloyds: [['2026-11-01', 'Expense', 22.15], ['2026-11-02', 'Income', 10]],
+    };
+    for (const [k, rows] of Object.entries(cases)) expect(tx(parse(ws, `${k}.csv`, csvBuf(rows))), k).toEqual(want[k]);
+    // Amex-style card export: spending positive. The "swap" option flips it.
+    const [tables] = imp.detectFile('amex.csv', csvBuf([['Date', 'Description', 'Amount'], ['01/11/2026', 'HOTEL', '120.00'], ['02/11/2026', 'PAYMENT RECEIVED', '-120.00']]));
+    expect(tx(imp.buildRows(fin, ws, tables)).map((r) => r[1])).toEqual(['Income', 'Expense']);
+    tables[0].flip = true;
+    expect(tx(imp.buildRows(fin, ws, tables))).toEqual([['2026-11-01', 'Expense', 120], ['2026-11-02', 'Income', 120]]);
+  });
+
+  it('every workbook format, odd extensions and real date cells', () => {
+    const ws = wsId();
+    const aoa = [['Statement for Nov'], [], ['Date', 'Description', 'Amount'],
+      [new Date(Date.UTC(2026, 10, 1)), 'Lunch', -9.5], [new Date(Date.UTC(2026, 10, 2)), 'Wages', 500]];
+    const want = [['2026-11-01', 'Expense', 9.5], ['2026-11-02', 'Income', 500]];
+    for (const bt of ['xlsx', 'xlsb', 'xls', 'biff8', 'ods', 'fods', 'html']) {
+      // (an HTML "spreadsheet" only ever holds one sheet)
+      const buf = aoaBook(bt === 'html' ? [['Nov', aoa, { cellDates: true }]] : [['Notes', [['nothing here']]], ['Nov', aoa, { cellDates: true }]], bt);
+      expect(tx(parse(ws, `f.${bt}`, buf)), bt).toEqual(want);
+      expect(tx(parse(ws, 'no-extension', buf)), `${bt} without extension`).toEqual(want);
+      expect(tx(parse(ws, 'wrong.csv', buf)), `${bt} named .csv`).toEqual(want);
+    }
+    // CSV named .xls (common bank download), tab and semicolon separated, Windows-1252 £
+    const csvText = 'Date;Description;Amount\n01/11/2026;Caf\xe9;\xa3-3,20\n';
+    expect(parse(ws, 'x.xls', new Uint8Array([...csvText].map((c) => c.charCodeAt(0))).buffer).map((r) => r.data.description)).toEqual(['Café']);
+    expect(tx(parse(ws, 'x.tsv', new TextEncoder().encode('Date\tDescription\tAmount\n01/11/2026\tBus\t-2.00\n').buffer))).toEqual([['2026-11-01', 'Expense', 2]]);
+  });
+
+  it('several tables and sheets, junk rows and a huge used range', () => {
+    const ws = wsId();
+    const sheet = XLSX.utils.aoa_to_sheet([['Date', 'Description', 'Amount'], ['01/11/2026', 'A', '-1.00'], ['', 'Total', '-1.00'], [], [],
+      ['Bills'], ['Bill', 'Due day', 'Amount'], ['Rent', '1', '900']]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, 'Mixed');
+    const rows = parse(ws, 'mixed.xlsx', XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+    // Excel sometimes reports a used range far bigger than the data: only real cells are read
+    sheet['!ref'] = 'A1:XFD1048576';
+    const t0 = Date.now();
+    expect(imp.sheetRows(sheet)).toHaveLength(8);
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(tx(rows)).toEqual([['2026-11-01', 'Expense', 1]]);
+    expect(rows.filter((r) => r.section === 'bills').map((r) => r.data.billName)).toEqual(['Rent']);
+  });
+
+  it('20,000 rows import quickly', () => {
+    const ws = wsId();
+    const aoa = [['Date', 'Description', 'Category', 'Amount']];
+    for (let i = 0; i < 20000; i++) aoa.push([`${(i % 28) + 1}/10/2026`, `Item ${i}`, `Cat ${i % 30}`, (-(i % 50) - 1).toFixed(2)]);
+    const t0 = Date.now();
+    const rows = parse(ws, 'big.xlsx', aoaBook([['Big', aoa]]));
+    expect(rows).toHaveLength(20000);
+    imp.importRows(fin, ws, rows);
+    expect(fin.transactions(ws)).toHaveLength(20000);
+    expect(Date.now() - t0).toBeLessThan(20000);
+  }, 60000);
+});
+
 describe('Excel backup', () => {
   it('round-trips everything exactly into a fresh app', () => {
     loadDemo(fin);

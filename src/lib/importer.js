@@ -342,21 +342,42 @@ function cellValue(cell) {
 }
 
 /** [[sheet name | null, rows]] from an .xlsx/.xls/.csv file's bytes. */
+/** What kind of file is this, from its first bytes (names and extensions can't be trusted). */
+export function sniffKind(name, buf) {
+  const b = new Uint8Array(buf.slice ? buf.slice(0, 8) : buf);
+  if (b[0] === 0x50 && b[1] === 0x4b) return 'workbook'; // zip: xlsx, xlsm, xlsb, ods
+  if (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0) return 'workbook'; // old .xls
+  if (b[0] === 0x09 && (b[1] === 0x08 || b[1] === 0x04)) return 'workbook'; // very old BIFF
+  const head = new TextDecoder('latin1').decode(new Uint8Array(buf.slice ? buf.slice(0, 600) : buf)).replace(/^\uFEFF|^\xEF\xBB\xBF/, '').trimStart().toLowerCase();
+  if (head.startsWith('<')) return 'workbook'; // HTML table or Excel 2003 XML saved as ".xls"
+  return 'text';
+}
+
+export function sheetRows(ws) {
+  // walk the cells that exist (a sheet's stated size can be a million rows of formatting)
+  let maxR = -1, maxC = -1;
+  const cells = [];
+  for (const k of Object.keys(ws)) {
+    if (k[0] === '!') continue;
+    const a = XLSX.utils.decode_cell(k);
+    const v = cellValue(ws[k]);
+    if (v === '' || v === null) continue;
+    cells.push([a.r, a.c, v]);
+    if (a.r > maxR) maxR = a.r;
+    if (a.c > maxC) maxC = a.c;
+  }
+  const rows = Array.from({ length: maxR + 1 }, () => new Array(maxC + 1).fill(''));
+  for (const [r, c, v] of cells) rows[r][c] = v;
+  return rows;
+}
+
+/** [[sheet name | null, rows]] from an .xlsx/.xls/.xlsb/.ods/.csv file's bytes. */
 export function readTables(name, buf) {
-  const low = (name || '').toLowerCase();
-  if (/\.(xlsx|xlsm|xls|ods)$/.test(low)) {
-    const wb = XLSX.read(buf, { type: 'array', cellDates: false, cellNF: true, cellText: false });
+  if (sniffKind(name, buf) === 'workbook') {
+    const wb = XLSX.read(buf, { type: 'array', cellDates: false, cellNF: true, cellText: false, cellStyles: false });
     return wb.SheetNames.map((sn) => {
       const ws = wb.Sheets[sn];
-      if (!ws['!ref']) return [sn, []];
-      const r = XLSX.utils.decode_range(ws['!ref']);
-      const rows = [];
-      for (let R = 0; R <= r.e.r; R++) {
-        const row = [];
-        for (let C = 0; C <= r.e.c; C++) row.push(cellValue(ws[XLSX.utils.encode_cell({ r: R, c: C })]));
-        rows.push(row);
-      }
-      return [sn, rows];
+      return [sn, ws ? sheetRows(ws) : []];
     });
   }
   const text = decodeText(buf);
@@ -483,7 +504,7 @@ export function buildRows(fin, ws, tables) {
       if (isBlank(r)) continue;
       const d = {};
       for (const [f, i] of Object.entries(t.mapping)) d[f] = i < r.length ? r[i] : '';
-      const row = build(t.section, d, r);
+      const row = build(t.section, d, r, t.flip);
       if (!row) continue;
       row.table = ti;
       rows.push(row);
@@ -506,7 +527,7 @@ function splitIcon(name) {
   return ['', (name || '').trim()];
 }
 
-function build(sec, d, raw) {
+function build(sec, d, raw, flip = false) {
   const row = { section: sec, data: {}, raw, status: 'new', reasons: [], include: true, table: -1 };
   const rs = row.reasons;
   const has = (k) => k in d;
@@ -517,6 +538,7 @@ function build(sec, d, raw) {
       const i = parseAmount(d.moneyIn) || 0, o = parseAmount(d.moneyOut) || 0;
       amt = (i || o) ? Math.abs(i) - Math.abs(o) : null;
     }
+    if (flip && amt !== null) amt = -amt;
     if (!date && looksSummary(raw)) return null;
     if (!date && amt === null) return null;
     let [typ, guessed] = normType(d.type, amt);
