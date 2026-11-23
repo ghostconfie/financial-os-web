@@ -1,0 +1,24 @@
+{
+  "name": "financial-os-web",
+  "version": "1.0.0",
+  "description": "Financial OS as a web app (PWA)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "firebase": "^13.4.0",
+    "preact": "^11.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "vite": "^6.4.6",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.1.1"
+  },
+  "private": true
+}
