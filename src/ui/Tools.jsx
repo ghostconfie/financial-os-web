@@ -1,7 +1,8 @@
+import { Fragment } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Finance } from '../lib/finance.js';
-import { TX_TYPES, fmtDate, fmtMoney, monthBounds, monthKey, monthLabel, shiftMonth, todayStr } from '../lib/util.js';
-import { Bar, Empty, Money, Pill, Seg, Select, Stat, useApp, useDebounced } from './components.jsx';
+import { TX_TYPES, addDays, fmtDate, fmtMoney, monthBounds, monthKey, monthLabel, shiftMonth, todayStr } from '../lib/util.js';
+import { Avatar, Bar, Empty, Icon, Money, Pill, Seg, Select, Stat, TxRow, useApp, useCatColors, useDebounced } from './components.jsx';
 
 // ===================================================================== Accounts
 export function Accounts() {
@@ -14,15 +15,15 @@ export function Accounts() {
     <div>
       <div class="page-head">
         <h1 class="grow">Bank Accounts</h1>
-        <span class="muted">Money at hand</span><Money v={total} class="" />
+        <span class="muted">Money at hand <Money v={total} class="" /></span>
         <button class="btn primary" onClick={() => open('account', {})}>+ Add account</button>
       </div>
       <div class="grid c3">
         {accs.map((a) => (
           <div class="card" key={a.id}>
-            <div class="row"><b class="grow">🏦 {a.name}</b>{a.balance < 0 && <Pill tone="rose">Overdrawn</Pill>}</div>
+            <div class="row"><Avatar name={a.name} color="#151815" /><b class="grow">{a.name}</b>{a.balance < 0 && <Pill tone="rose">Overdrawn</Pill>}</div>
             <div class="eyebrow" style={{ marginTop: 8 }}>Current balance</div>
-            <div class={`money ${a.balance < 0 ? 'neg' : ''}`} style={{ fontSize: 26, fontWeight: 700 }}>{fmtMoney(a.balance)}</div>
+            <div class={`money ${a.balance < 0 ? 'neg' : ''}`} style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-.03em' }}>{fmtMoney(a.balance)}</div>
             <div class="col small" style={{ margin: '8px 0', gap: 2 }}>
               {[['Initial balance', a.initialBalance, false], ['Total income', a.income, true], ['Total spending', -a.expenses, true], ['Net transfers', a.netTransfers, true]].map(([l, v, s]) => (
                 <div class="row" key={l}><span class="muted grow">{l}</span><Money v={v} signed={s} tone={s} /></div>
@@ -43,19 +44,19 @@ export function Accounts() {
         <button class="btn" onClick={() => open('quick', { mode: 'transfer' })}>+ Transfer</button></div>
       <div class="tablewrap">
         <table class="t">
-          <thead><tr><th>Date</th><th>From</th><th>To</th><th class="money">Amount</th><th class="hide-sm">Notes</th><th /></tr></thead>
+          <thead><tr><th>Date</th><th class="hide-sm">From</th><th class="hide-sm">To</th><th class="show-sm">From → To</th><th class="money">Amount</th><th class="hide-sm">Notes</th><th /></tr></thead>
           <tbody>
             {(showAll ? transfers : transfers.slice(0, 15)).map((t) => (
               <tr key={t.id}>
-                <td class="nowrap">{fmtDate(t.date)}</td><td>{t.fromAccount}</td><td>{t.toAccount}</td>
+                <td class="nowrap">{fmtDate(t.date)}</td><td class="hide-sm">{t.fromAccount}</td><td class="hide-sm">{t.toAccount}</td><td class="show-sm small">{t.fromAccount} → {t.toAccount}</td>
                 <td class="money"><Money v={t.amount} /></td><td class="hide-sm muted clip">{t.notes}</td>
                 <td class="right nowrap">
                   <button class="btn sm ghost" onClick={() => open('quick', { mode: 'transfer', prefill: t })}>Edit</button>
-                  <button class="btn sm ghost danger" onClick={() => open('confirm', { title: 'Delete this transfer?', body: `${fmtMoney(t.amount)} from ${t.fromAccount} to ${t.toAccount} on ${fmtDate(t.date)}.`, action: () => fin.deleteTransfer(t.id), label: 'Delete' })}>Delete</button>
+                  <button class="btn sm ghost danger hide-sm" onClick={() => open('confirm', { title: 'Delete this transfer?', body: `${fmtMoney(t.amount)} from ${t.fromAccount} to ${t.toAccount} on ${fmtDate(t.date)}.`, action: () => fin.deleteTransfer(t.id), label: 'Delete' })}>Delete</button>
                 </td>
               </tr>
             ))}
-            {!transfers.length && <tr><td colSpan={6}><Empty>No transfers yet. Transfers move cash between accounts and don't count as income or spending.</Empty></td></tr>}
+            {!transfers.length && <tr><td colSpan={7}><Empty>No transfers yet. Transfers move cash between accounts and don't count as income or spending.</Empty></td></tr>}
           </tbody>
         </table>
       </div>
@@ -72,6 +73,9 @@ export function Transactions() {
   const [f, setF] = useState({ ...blank, ...(ledgerFilter || {}) });
   const [sel, setSel] = useState(new Set());
   const [limit, setLimit] = useState(PAGE);
+  const [showFilters, setShowFilters] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const colors = useCatColors();
   useEffect(() => { if (ledgerFilter) { setF({ ...blank, ...ledgerFilter }); setLedgerFilter(null); setSel(new Set()); } }, [ledgerFilter]);
   useEffect(() => { setSel(new Set()); setLimit(PAGE); }, [ws]);
   const search = useDebounced(f.search, 150);
@@ -89,34 +93,40 @@ export function Transactions() {
   const ids = [...sel].filter((id) => rows.some((r) => r.id === id));
   const need = (fn) => () => (ids.length ? fn() : toast('Tick one or more transactions first.'));
   const filtered = f.search || f.account || f.category || f.type || f.month || f.poolId || f.range;
+  const nFilters = [f.account, f.category, f.type, f.month, f.poolId, f.range].filter(Boolean).length;
+  const today = todayStr();
+  const yday = addDays(today, -1);
+  const dayLabel = (d) => (d === today ? 'Today' : d === yday ? 'Yesterday' : fmtDate(d));
   return (
     <div>
       <div class="page-head">
-        <h1 class="grow">All Transactions</h1>
-        <span class="muted small">{rows.length} of {totalAll} · net <Money v={net} tone /></span>
+        <h1 class="grow">Transactions</h1>
+        <span class="muted small grow">{rows.length} of {totalAll} · net <Money v={net} tone /></span>
         <button class="btn ghost" onClick={() => setF(blank)} disabled={!filtered}>Clear filters</button>
         <button class="btn primary" onClick={() => open('quick', { mode: 'tx' })}>+ Add</button>
       </div>
-      <div class="card flat" style={{ padding: 10, marginBottom: 10 }}>
+      <div class={`card flat filters ${showFilters ? 'open' : ''}`} style={{ padding: 12, marginBottom: 12 }}>
         <div class="row wrap">
-          <input type="search" style={{ flex: '2 1 220px', width: 'auto' }} placeholder="Search description, category, account…" value={f.search} onInput={(e) => set('search', e.currentTarget.value)} />
-          <div style={{ flex: '1 1 140px' }}><Select value={f.account} onChange={(v) => set('account', v)} options={[[null, 'All accounts'], ...fin.accountNames(ws).map((n) => [n, n])]} /></div>
-          <div style={{ flex: '1 1 140px' }}><Select value={f.category} onChange={(v) => set('category', v)} options={[[null, 'All categories'], ...fin.categories(ws).map((c) => [c.name, c.name])]} /></div>
-          <div style={{ flex: '1 1 120px' }}><Select value={f.type} onChange={(v) => set('type', v)} options={[[null, 'All types'], ...TX_TYPES.map((t) => [t, t])]} /></div>
-          <div style={{ flex: '1 1 140px' }}><Select value={f.poolId} onChange={(v) => set('poolId', v)} options={[[null, 'All pools'], ...pools.map((p) => [p.id, `${p.icon} ${p.name}`])]} /></div>
-          {!f.range && <div style={{ flex: '1 1 140px' }}><Select value={f.month} onChange={(v) => set('month', v)} options={[[null, 'All months'], ...months.map((m) => [m, monthLabel(m)])]} /></div>}
-          <label class="check small"><input type="checkbox" checked={f.range} onChange={(e) => set('range', e.currentTarget.checked)} />Date range</label>
+          <input type="search" style={{ flex: '2 1 200px', width: 'auto', minWidth: 0 }} placeholder="Search description, category, account…" value={f.search} onInput={(e) => set('search', e.currentTarget.value)} />
+          <button type="button" class={`btn filters-toggle ${nFilters ? 'primary' : ''}`} onClick={() => setShowFilters(!showFilters)}><Icon name="filter" size={16} />Filters{nFilters ? ` (${nFilters})` : ''}</button>
+          <div class="filters-more" style={{ flex: '1 1 140px' }}><Select value={f.account} onChange={(v) => set('account', v)} options={[[null, 'All accounts'], ...fin.accountNames(ws).map((n) => [n, n])]} /></div>
+          <div class="filters-more" style={{ flex: '1 1 140px' }}><Select value={f.category} onChange={(v) => set('category', v)} options={[[null, 'All categories'], ...fin.categories(ws).map((c) => [c.name, c.name])]} /></div>
+          <div class="filters-more" style={{ flex: '1 1 120px' }}><Select value={f.type} onChange={(v) => set('type', v)} options={[[null, 'All types'], ...TX_TYPES.map((t) => [t, t])]} /></div>
+          <div class="filters-more" style={{ flex: '1 1 140px' }}><Select value={f.poolId} onChange={(v) => set('poolId', v)} options={[[null, 'All pools'], ...pools.map((p) => [p.id, `${p.icon} ${p.name}`])]} /></div>
+          {!f.range && <div class="filters-more" style={{ flex: '1 1 140px' }}><Select value={f.month} onChange={(v) => set('month', v)} options={[[null, 'All months'], ...months.map((m) => [m, monthLabel(m)])]} /></div>}
+          <label class="check small filters-more"><input type="checkbox" checked={f.range} onChange={(e) => set('range', e.currentTarget.checked)} />Date range</label>
           {f.range && <>
-            <input type="date" style={{ width: 'auto' }} value={f.start} onInput={(e) => set('start', e.currentTarget.value)} />
-            <span class="muted">→</span>
-            <input type="date" style={{ width: 'auto' }} value={f.end} onInput={(e) => set('end', e.currentTarget.value)} />
+            <input type="date" class="filters-more" style={{ flex: '1 1 140px', width: 'auto' }} value={f.start} onInput={(e) => set('start', e.currentTarget.value)} />
+            <span class="muted filters-more">→</span>
+            <input type="date" class="filters-more" style={{ flex: '1 1 140px', width: 'auto' }} value={f.end} onInput={(e) => set('end', e.currentTarget.value)} />
           </>}
         </div>
-        <div class="row wrap" style={{ marginTop: 8 }}>
-          <span class="small muted">{ids.length ? `${ids.length} selected` : 'Tick rows to change several at once. Tap a row to edit it.'}</span>
+        <div class="row wrap" style={{ marginTop: 10 }}>
+          <span class="small muted">{ids.length ? `${ids.length} selected` : <><span class="hide-sm">Tick rows to change several at once. Tap a row to edit it.</span><span class="show-sm">Tap a transaction to edit it.</span></>}</span>
           <span class="spacer" />
-          <button class="btn sm" onClick={need(() => open('remap', { ids }))}>Remap category</button>
-          <select style={{ width: 'auto', minHeight: 28, fontSize: 12, padding: '3px 26px 3px 8px' }} value="" onChange={(e) => {
+          <button class="btn sm show-sm" onClick={() => { if (selecting) setSel(new Set()); setSelecting(!selecting); }}>{selecting ? 'Done' : 'Select'}</button>
+          <button class={`btn sm ${selecting ? '' : 'hide-sm'}`} onClick={need(() => open('remap', { ids }))}>Remap category</button>
+          <select class={selecting ? '' : 'hide-sm'} style={{ width: 'auto', minHeight: 32, fontSize: 12, padding: '3px 28px 3px 12px', borderRadius: 999 }} value="" onChange={(e) => {
             const v = e.currentTarget.value; e.currentTarget.value = '';
             if (!ids.length) return toast('Tick one or more transactions first.');
             fin.setTransactionsPool(ids, v === '__none' ? null : v); toast(`Moved ${ids.length} to ${v === '__none' ? 'no pool' : poolNames[v]}`);
@@ -125,7 +135,7 @@ export function Transactions() {
             {pools.map((p) => <option key={p.id} value={p.id}>{p.icon} {p.name}</option>)}
             <option value="__none">— No pool —</option>
           </select>
-          <button class="btn sm danger" onClick={need(() => open('confirm', {
+          <button class={`btn sm danger ${selecting ? '' : 'hide-sm'}`} onClick={need(() => open('confirm', {
             title: `Delete ${ids.length} transaction${ids.length === 1 ? '' : 's'}?`, body: 'This cannot be undone (but your Excel backups still have them).', label: 'Delete',
             action: () => { fin.deleteTransactions(ids); setSel(new Set()); },
           }))}>Delete</button>
@@ -146,7 +156,7 @@ export function Transactions() {
                 <td class="muted nowrap">{t.type}</td>
                 <td class="nowrap">{t.category}</td>
                 <td class="muted nowrap">{t.bankAccount}</td>
-                <td class="clip">{t.description}</td>
+                <td class="clip"><div class="row"><Avatar small name={t.description || t.category} color={colors[(t.category || '').toLowerCase()]} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.description}</span></div></td>
                 <td class="muted nowrap">{t.poolId ? poolNames[t.poolId] || t.poolName : '—'}</td>
                 <td>{t.isBusinessPayment ? <Pill tone="amber">{t.businessWorkspaceName || 'DLA'}</Pill> : ''}</td>
                 <td class="money"><Money v={t.amount} tone signed /></td>
@@ -156,20 +166,20 @@ export function Transactions() {
           </tbody>
         </table>
       </div>
-      <div class="txlist">
-        {rows.slice(0, limit).map((t) => (
-          <div class={`txitem ${sel.has(t.id) ? 'sel' : ''}`} key={t.id} onClick={(e) => { if (e.target.type !== 'checkbox') open('quick', { mode: 'tx', prefill: t }); }}>
-            <input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} aria-label="Select" />
-            <div class="grow" style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description || t.category}</div>
-              <div class="d">{fmtDate(t.date)} · {t.category} · {t.bankAccount}{t.isBusinessPayment ? ' · DLA' : ''}</div>
-            </div>
-            <Money v={t.amount} tone signed />
-          </div>
+      <div class="txlist txrows" style={{ flexDirection: 'column' }}>
+        {rows.slice(0, limit).map((t, i, arr) => (
+          <Fragment key={t.id}>
+            {(i === 0 || arr[i - 1].date !== t.date) && <div class="day-label">{dayLabel(t.date)}</div>}
+            <TxRow t={t} selected={sel.has(t.id)} color={colors[(t.category || '').toLowerCase()]}
+              sub={`${t.category} · ${t.bankAccount}${t.isBusinessPayment ? ' · DLA' : ''}`}
+              onClick={(e) => { if (e.target.type === 'checkbox') return; if (selecting) toggle(t.id); else open('quick', { mode: 'tx', prefill: t }); }}>
+              {selecting && <input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} aria-label="Select" />}
+            </TxRow>
+          </Fragment>
         ))}
-        {!rows.length && <Empty>{totalAll ? 'No transactions match these filters.' : 'No transactions yet.'}</Empty>}
+        {!rows.length && <div class="card"><Empty>{totalAll ? 'No transactions match these filters.' : 'No transactions yet.'}</Empty></div>}
       </div>
-      {rows.length > limit && <button class="btn block" style={{ marginTop: 10 }} onClick={() => setLimit(limit + PAGE * 2)}>Show more ({rows.length - limit} left)</button>}
+      {rows.length > limit && <button class="btn block" style={{ marginTop: 12 }} onClick={() => setLimit(limit + PAGE * 2)}>Show more ({rows.length - limit} left)</button>}
     </div>
   );
 }
@@ -277,15 +287,16 @@ export function Categories() {
       </div>
       <div class="tablewrap">
         <table class="t">
-          <thead><tr><th class="chk" /><th>Name</th><th class="hide-sm">Default type</th><th class="hide-sm">Bank account</th><th>Pool</th><th class="money">Allocated</th><th class="money hide-sm">Spent (all time)</th><th /></tr></thead>
+          <thead><tr><th class="chk" /><th>Name</th><th class="hide-sm">Default type</th><th class="hide-sm">Bank account</th><th class="hide-sm">Pool</th><th class="money">Allocated</th><th class="money hide-sm">Spent (all time)</th><th /></tr></thead>
           <tbody>
             {cats.map((c) => (
               <tr key={c.id} class={sel.has(c.id) ? 'sel' : ''}>
                 <td class="chk"><input type="checkbox" checked={sel.has(c.id)} onChange={() => toggle(c.id)} aria-label="Select" /></td>
-                <td><div class="row"><span class="swatch" style={{ background: c.color }} />{c.name}{c.isProtected && <Pill>Core</Pill>}</div></td>
+                <td><div class="row"><span class="swatch" style={{ background: c.color }} />{c.name}{c.isProtected && <Pill>Core</Pill>}</div>
+                  <div class="show-sm small muted" style={{ marginLeft: 18 }}>{c.poolId && pools[c.poolId] ? `${pools[c.poolId].icon} ${pools[c.poolId].name}` : 'Unpooled'}</div></td>
                 <td class="hide-sm muted">{c.defaultType}</td>
                 <td class="hide-sm muted">{!c.bankAccount || c.bankAccount === 'ALL' ? 'All accounts' : c.bankAccount}</td>
-                <td class="nowrap">{c.poolId && pools[c.poolId] ? `${pools[c.poolId].icon} ${pools[c.poolId].name}` : <span class="muted">Unpooled</span>}</td>
+                <td class="nowrap hide-sm">{c.poolId && pools[c.poolId] ? `${pools[c.poolId].icon} ${pools[c.poolId].name}` : <span class="muted">Unpooled</span>}</td>
                 <td class="money"><Money v={c.allocated} /></td>
                 <td class="money hide-sm"><Money v={spentAll[c.name.toLowerCase()] || 0} /></td>
                 <td class="right"><button class="btn sm ghost" onClick={() => open('category', { cat: c })}>Edit</button></td>
@@ -297,7 +308,7 @@ export function Categories() {
       <div class="row" style={{ margin: '22px 0 8px' }}><h2 class="grow">Budget goals</h2><button class="btn" onClick={() => open('goal', {})}>+ Add goal</button></div>
       <div class="tablewrap">
         <table class="t">
-          <thead><tr><th>Category</th><th class="hide-sm">Type</th><th class="money">Goal</th><th class="money">This month</th><th style={{ width: '30%' }}>Progress</th><th /></tr></thead>
+          <thead><tr><th>Category</th><th class="hide-sm">Type</th><th class="money">Goal</th><th class="money">This month</th><th class="hide-sm" style={{ width: '30%' }}>Progress</th><th /></tr></thead>
           <tbody>
             {goals.map((g) => {
               const got = thisMonth[(g.category || '').toLowerCase()] || 0;
@@ -306,10 +317,10 @@ export function Categories() {
               return (
                 <tr key={g.id}>
                   <td>{g.category}</td><td class="hide-sm muted">{g.type}</td><td class="money"><Money v={g.amount} /></td><td class="money"><Money v={got} /></td>
-                  <td><div class="row"><div class="grow"><Bar pct={pct} color={saving ? 'var(--emerald)' : undefined} /></div><span class="small muted">{Math.round(pct)}%</span></div></td>
+                  <td class="hide-sm"><div class="row"><div class="grow"><Bar pct={pct} color={saving ? 'var(--emerald)' : undefined} /></div><span class="small muted">{Math.round(pct)}%</span></div></td>
                   <td class="right nowrap">
                     <button class="btn sm ghost" onClick={() => open('goal', { goal: g })}>Edit</button>
-                    <button class="btn sm ghost danger" onClick={() => open('confirm', { title: 'Delete this goal?', body: g.category, label: 'Delete', action: () => fin.deleteGoal(g.id) })}>Delete</button>
+                    <button class="btn sm ghost danger" onClick={() => open('confirm', { title: 'Delete this goal?', body: g.category, label: 'Delete', action: () => fin.deleteGoal(g.id) })}><span class="hide-sm">Delete</span><span class="show-sm" aria-label="Delete">✕</span></button>
                   </td>
                 </tr>
               );
@@ -336,7 +347,30 @@ export function Bills() {
         <div class="grow"><h1>Upcoming Bills</h1><div class="sub">{pending.length} unpaid this month · {fmtMoney(due)} still to pay</div></div>
         <button class="btn primary" onClick={() => open('bill', {})}>+ Add bill</button>
       </div>
-      <div class="tablewrap">
+      <div class="mlist">
+        {bills.map((b, i) => {
+          const st = sts[i];
+          return (
+            <div class="mitem" key={b.id}>
+              <div class="top">
+                <Avatar name={b.billName} color={st.paid ? '#13a150' : '#151815'} />
+                <div class="grow"><div class="name">{b.billName}</div><div class="small muted">Due {st.dueLabel} · {b.bankAccount}</div></div>
+                <div class="col" style={{ alignItems: 'flex-end' }}><Money v={b.amount} class="big" /><Pill tone={st.tone === 'neutral' ? '' : st.tone}>{st.status}</Pill></div>
+              </div>
+              {b.notes && <div class="small muted">{b.notes}</div>}
+              <div class="acts">
+                <button class={`btn sm ${st.paid ? 'primary' : ''}`} onClick={() => fin.toggleBillPaid(b.id)}>{st.paid ? '✓ Paid' : 'Mark paid'}</button>
+                <button class="btn sm ghost" onClick={() => open('quick', { mode: 'tx', prefill: { type: 'Bills', category: b.category, bankAccount: b.bankAccount, amount: b.amount, description: b.billName } })}>Log payment</button>
+                <span class="spacer" />
+                <button class="btn sm ghost" onClick={() => open('bill', { bill: b })}>Edit</button>
+                <button class="btn sm ghost danger" aria-label="Delete" onClick={() => open('confirm', { title: `Delete ${b.billName}?`, label: 'Delete', action: () => fin.deleteBill(b.id) })}>✕</button>
+              </div>
+            </div>
+          );
+        })}
+        {!bills.length && <div class="card"><Empty>No recurring bills yet.</Empty></div>}
+      </div>
+      <div class="tablewrap desk">
         <table class="t">
           <thead><tr><th>Bill</th><th class="hide-sm">Category</th><th>Due</th><th>Status</th><th class="money">Amount</th><th class="hide-sm">Account</th><th class="hide-sm">Reminder</th><th>This month</th><th /></tr></thead>
           <tbody>
@@ -395,12 +429,12 @@ export function DLA() {
       </div>
       <div class="tablewrap">
         <table class="t">
-          <thead><tr><th>Date</th><th class="hide-sm">Paid from</th><th>Business</th><th>Description</th><th class="hide-sm">Business category</th><th class="hide-sm">Notes</th><th class="money">DLA effect</th></tr></thead>
+          <thead><tr><th>Date</th><th class="hide-sm">Paid from</th><th class="hide-sm">Business</th><th>Description</th><th class="hide-sm">Business category</th><th class="hide-sm">Notes</th><th class="money">DLA effect</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => open('quick', { mode: 'tx', prefill: r, wsOverride: r.workspaceId })}>
                 <td class="nowrap">{fmtDate(r.date)}</td><td class="hide-sm muted">{r.sourceWorkspace} · {r.bankAccount}</td>
-                <td>{r.businessWorkspaceName}</td><td class="clip">{r.description}</td><td class="hide-sm muted">{r.businessCategory}</td>
+                <td class="hide-sm">{r.businessWorkspaceName}</td><td class="clip" style={{ maxWidth: 'min(280px, 40vw)' }}>{r.description}<div class="show-sm small muted">{r.businessWorkspaceName}</div></td><td class="hide-sm muted">{r.businessCategory}</td>
                 <td class="hide-sm muted clip">{r.dlaNotes}</td><td class="money"><Money v={r.dlaEffect} signed tone /></td>
               </tr>
             ))}
@@ -442,8 +476,8 @@ export function Analysis() {
       </div>
       <div class="row wrap" style={{ marginBottom: 8 }}>
         <h2 class="grow">Category breakdown</h2>
-        <div style={{ width: 160 }}><Select value={type} onChange={setType} options={[[null, 'All types'], ...TX_TYPES.map((x) => [x, x])]} /></div>
-        <input type="search" style={{ width: 200 }} placeholder="Filter categories…" value={q} onInput={(ev) => setQ(ev.currentTarget.value)} />
+        <div style={{ flex: '1 1 150px', maxWidth: 200 }}><Select value={type} onChange={setType} options={[[null, 'All types'], ...TX_TYPES.map((x) => [x, x])]} /></div>
+        <input type="search" style={{ flex: '1 1 150px', width: 'auto', maxWidth: 240 }} placeholder="Filter categories…" value={q} onInput={(ev) => setQ(ev.currentTarget.value)} />
       </div>
       <div class="tablewrap">
         <table class="t">

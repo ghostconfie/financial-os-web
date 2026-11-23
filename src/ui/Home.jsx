@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'preact/hooks';
 import { fmtDate, fmtMoney, monthKey, monthLabel, shiftMonth } from '../lib/util.js';
-import { Bar, Donut, Empty, Money, Pill, Seg, Sparkline, Stat, useApp } from './components.jsx';
+import { Bar, Donut, Empty, Icon, Money, Pill, Seg, Sparkline, Stat, TxRow, useApp, useCatColors } from './components.jsx';
 
 const FILTERS = [['ALL', 'All'], ['Expense', 'Expenses'], ['Bills', 'Bills'], ['Debt Payment', 'Debt'], ['Savings', 'Savings'], ['Investment', 'Investments']];
 
@@ -76,10 +76,10 @@ function Sector({ m, metrics }) {
   const over = m.leftToSpend < -0.004;
   return (
     <div class="card" style={{ marginTop: 4 }} id="sector">
-      <div class="row wrap" style={{ marginBottom: 12 }}>
-        <div class="row grow">
-          <div class="icon" style={{ width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center', fontSize: 20, background: `${m.color}22` }}>{m.icon}</div>
-          <div>
+      <div class="row wrap sector-head" style={{ marginBottom: 14 }}>
+        <div class="row" style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <div class="icon" style={{ width: 42, height: 42, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 20, background: `${m.color}22`, flex: 'none' }}>{m.icon}</div>
+          <div style={{ minWidth: 0 }}>
             <h2>{m.name} · Zero-based budget</h2>
             <div class="muted small">{m.description || (m.isWorkspaceConnected ? 'Connected to Money at Hand' : 'Standalone pool with its own target')}</div>
           </div>
@@ -101,7 +101,7 @@ function Sector({ m, metrics }) {
       {Math.abs(un) >= 0.005 && (
         <div class="notice" style={{ marginTop: 12 }}>⚠ {fmtMoney(un)} in {m.name} isn't assigned to a category yet. Give every pound a job until Unassigned reads £0.00.</div>
       )}
-      <div class="row wrap" style={{ margin: '14px 0 10px' }}>
+      <div class="row wrap sector-tools" style={{ margin: '14px 0 10px' }}>
         <Seg value={filter} onChange={setFilter} options={FILTERS} />
         <span class="spacer" />
         <select style={{ width: 'auto' }} value={sort} onChange={(e) => setSort(e.currentTarget.value)}>
@@ -113,7 +113,28 @@ function Sector({ m, metrics }) {
         </select>
         <button class="btn" onClick={() => open('category', { prefill: { poolId: m.id } })}>+ New line</button>
       </div>
-      <div class="tablewrap">
+      <div class="mlist">
+        {lines.map((l) => (
+          <div class="mitem" key={l.id}>
+            <div class="top">
+              <span class="swatch" style={{ background: l.color }} />
+              <span class="name grow">{l.name}</span>{l.isProtected && <Pill>Core</Pill>}
+              <Money v={l.remaining} tone class="big" />
+            </div>
+            <Bar pct={l.pctUsed} />
+            <div class="acts">
+              <span class="small muted">Spent <Money v={l.spent} /> of</span>
+              <AllocInput line={l} />
+              <span class="spacer" />
+              {l.remaining < -0.004
+                ? <button class="btn sm danger" onClick={() => open('cover', { line: l, metric: m, metrics })}>Cover {fmtMoney(-l.remaining)}</button>
+                : <button class="btn sm" onClick={() => open('category', { cat: l })}>Edit</button>}
+            </div>
+          </div>
+        ))}
+        {!lines.length && <Empty>No category lines {filter !== 'ALL' ? 'of this type ' : ''}in this pool yet. Use “+ New line” or pull a category in.</Empty>}
+      </div>
+      <div class="tablewrap desk">
         <table class="t">
           <thead><tr>
             <th>Category</th><th class="hide-sm">Type</th><th class="hide-sm">Pool</th><th class="money">Allocated</th><th class="money">Spent</th>
@@ -178,7 +199,9 @@ function AllocInput({ line }) {
 }
 
 export function Home() {
-  const { fin, ws, month, open, workspace, version } = useApp();
+  const { fin, ws, month, open, go, workspace, version } = useApp();
+  const colors = useCatColors();
+  const latest = useMemo(() => fin.transactions(ws, {}).slice(0, 5), [version, ws]);
   const [active, setActive] = useState(null);
   const [q, setQ] = useState('');
   const metrics = useMemo(() => fin.poolMetrics(ws, month), [version, ws, month]);
@@ -203,32 +226,47 @@ export function Home() {
         <MonthBar />
       </div>
       <div class="hero">
-        <div class="card main">
-          <div>
-            <div class="eyebrow">Money at hand</div>
+        <div class="card balance-card">
+          <div class="balance">
+            <div class="b-label">Money at hand</div>
+            <div class="b-sub">GBP · across {accounts} bank account{accounts === 1 ? '' : 's'}</div>
             <div class={`mah ${head.moneyAtHand < 0 ? 'neg' : ''}`}>{fmtMoney(head.moneyAtHand)}</div>
-            <div class="muted small">Across {accounts} bank account{accounts === 1 ? '' : 's'}</div>
             <div class="kpis">
-              <div><div class="eyebrow">Assigned to pools</div><div class="v">{fmtMoney(head.assigned)}</div></div>
-              <div><div class="eyebrow">Unpooled</div><div class={`v ${head.unpooled > 0 ? 'warn' : ''}`}>{fmtMoney(head.unpooled)}</div></div>
-              <div><div class="eyebrow">Standalone targets</div><div class="v">{fmtMoney(head.standalone)}</div></div>
+              <div><div class="k">In pools</div><div class="v">{fmtMoney(head.assigned)}</div></div>
+              <div><div class="k">Unpooled</div><div class={`v ${head.unpooled > 0 ? 'warn' : ''}`}>{fmtMoney(head.unpooled)}</div></div>
+              <div><div class="k">Standalone</div><div class="v">{fmtMoney(head.standalone)}</div></div>
             </div>
-            {head.unpooled > 0.004 && <div class="small warn" style={{ marginTop: 8 }}>{fmtMoney(head.unpooled)} of cash isn't assigned to a pool yet.</div>}
+            {head.unpooled > 0.004 && <div class="hint">{fmtMoney(head.unpooled)} of cash isn't in a pool yet.</div>}
           </div>
-          <div class="col">
-            <div class="row"><span class="muted small grow">Balance · last 30 days</span><button class="btn primary sm" onClick={() => open('pool', {})}>+ New pool</button></div>
-            <Sparkline data={series} height={118} />
-            <div class="row small faint"><span class="grow">{fmtDate(series[0]?.[0])}</span><span>{fmtMoney(series[series.length - 1]?.[1])}</span></div>
+          <div class="actions">
+            <button onClick={() => open('quick', { mode: 'tx' })}><span class="ib"><Icon name="plus" /></span>Add</button>
+            <button onClick={() => open('quick', { mode: 'transfer' })}><span class="ib"><Icon name="transfer" /></span>Transfer</button>
+            <button onClick={() => open('pool', {})}><span class="ib"><Icon name="pool" /></span>New pool</button>
+            <button onClick={() => open('import')}><span class="ib"><Icon name="upload" /></span>Import</button>
+          </div>
+          <div class="spark">
+            <div class="row small muted"><span class="grow">Balance · last 30 days</span><span class="money">{fmtMoney(series[series.length - 1]?.[1])}</span></div>
+            <Sparkline data={series} height={70} />
           </div>
         </div>
         <div class="card">
-          <h3 style={{ marginBottom: 10 }}>Spending by category</h3>
+          <div class="card-head"><h3>Latest transactions</h3><button class="link" onClick={() => go('tx')}>See all</button></div>
+          <div class="txrows inset">
+            {latest.map((t) => (
+              <TxRow key={t.id} t={t} color={colors[(t.category || '').toLowerCase()]} sub={`${fmtDate(t.date)} · ${t.category}`}
+                onClick={() => open('quick', { mode: 'tx', prefill: t })} />
+            ))}
+            {!latest.length && <Empty>No transactions yet. Tap “Add” to log one.</Empty>}
+          </div>
+        </div>
+        <div class="card">
+          <h3 style={{ marginBottom: 12 }}>Spending by category</h3>
           <div class="donut-wrap">
             <Donut items={top} center={fmtMoney(totalSpend).replace(/\.\d\d$/, '')} sub={month ? 'spent this month' : 'spent all time'} />
             <div class="legend">
               {top.map(([n, v, c]) => (
                 <div class="li" key={n}><span class="swatch" style={{ background: c }} /><span class="n">{n}</span>
-                  <span class="money">{fmtMoney(v)}</span><span class="faint" style={{ width: 32, textAlign: 'right' }}>{totalSpend ? Math.round(v / totalSpend * 100) : 0}%</span></div>
+                  <span class="money">{fmtMoney(v)}</span><span class="faint hide-sm" style={{ width: 32, textAlign: 'right' }}>{totalSpend ? Math.round(v / totalSpend * 100) : 0}%</span></div>
               ))}
               {!top.length && <div class="muted">No spending yet.</div>}
             </div>
@@ -236,8 +274,8 @@ export function Home() {
         </div>
       </div>
 
-      <div class="card flat" style={{ padding: 10 }}>
-        <input type="search" placeholder="🔍  Find a category across all pools…" value={q} onInput={(e) => setQ(e.currentTarget.value)} />
+      <div class="card flat" style={{ padding: 8, borderRadius: 999 }}>
+        <input type="search" style={{ borderRadius: 999, background: 'transparent' }} placeholder="🔍  Find a category across all pools…" value={q} onInput={(e) => setQ(e.currentTarget.value)} />
         {q.trim() && (
           <div class="col" style={{ marginTop: 8, gap: 6 }}>
             {hits.map((h) => (
