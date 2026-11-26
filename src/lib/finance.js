@@ -3,7 +3,7 @@
 
 import {
   OUTFLOW_TYPES, TX_TYPES, addDays, daysInMonth, dayDiff, fmtMoney, monthBounds, monthKey, nowLondon,
-  ordinal, round2, signedAmount, todayStr, weekStart,
+  ordinal, round2, shiftMonth, signedAmount, todayStr, weekStart,
 } from './util.js';
 
 export const PRESET_WORKSPACES = [['Personal', 'personal'], ['Scrumbb', 'business'], ['Clean and Serve', 'business']];
@@ -87,7 +87,7 @@ export class Finance {
   deleteWorkspace(wsId) {
     if (this.workspaces().length <= 1) throw new FinanceError('You need at least one workspace.');
     for (const table of ['transactions', 'transfers', 'categories', 'budget_pools', 'pool_transfers', 'bills',
-      'budget_goals', 'bank_accounts']) {
+      'budget_goals', 'bank_accounts', 'plan_items', 'plan_notes', 'forecasts']) {
       for (const r of this.db.all(table, { workspaceId: wsId })) this.db.delete(table, r.id);
     }
     this.db.delete('workspaces', wsId);
@@ -697,6 +697,102 @@ export class Finance {
       if (!c.poolId && lc(c.name).includes(q)) hits.push({ ...c, spent: 0, remaining: c.allocated, poolName: null, poolIcon: '' });
     }
     return hits;
+  }
+
+  // ======================================================= plans & forecast
+  planItems(ws) {
+    const rank = { idea: 0, saving: 1, bought: 2 };
+    return this.db.all('plan_items', { workspaceId: ws }).sort((a, b) => ((rank[a.status] ?? 0) - (rank[b.status] ?? 0))
+      || (a.targetMonth || '9999').localeCompare(b.targetMonth || '9999') || byName(a, b));
+  }
+
+  savePlanItem(ws, data) {
+    const d = { ...data, workspaceId: ws, name: (data.name || '').trim() };
+    if (!d.name) throw new FinanceError('Give it a name.');
+    for (const k of ['cost', 'extraCost', 'monthlyCost']) d[k] = Math.abs(Number(d[k]) || 0);
+    if (!['idea', 'saving', 'bought'].includes(d.status)) d.status = 'idea';
+    d.targetMonth = /^\d{4}-\d{2}$/.test(d.targetMonth || '') ? d.targetMonth : null;
+    const out = d.id && this.db.get('plan_items', d.id) ? this.db.update('plan_items', d.id, d) : this.db.insert('plan_items', d);
+    this.db.commit();
+    return out;
+  }
+
+  deletePlanItem(id) { this.db.delete('plan_items', id); this.db.commit(); }
+
+  planNotes(ws) {
+    return this.db.all('plan_notes', { workspaceId: ws }).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }
+
+  savePlanNote(ws, data) {
+    const d = { ...data, workspaceId: ws, title: (data.title || '').trim(), body: (data.body || '').trim() };
+    if (!d.title && !d.body) throw new FinanceError('Write something first.');
+    const out = d.id && this.db.get('plan_notes', d.id) ? this.db.update('plan_notes', d.id, d) : this.db.insert('plan_notes', d);
+    this.db.commit();
+    return out;
+  }
+
+  deletePlanNote(id) { this.db.delete('plan_notes', id); this.db.commit(); }
+
+  /** The workspace's forecast settings (defaults until first saved). */
+  forecastSettings(ws) {
+    const f = this.db.all('forecasts', { workspaceId: ws })[0];
+    return f || { id: null, workspaceId: ws, startAmount: 0, useMoneyAtHand: true, monthlySaving: 200, interestRate: 0, years: 5, includePlans: true };
+  }
+
+  saveForecastSettings(ws, fields) {
+    const cur = this.forecastSettings(ws);
+    const d = { ...cur, ...fields, workspaceId: ws };
+    d.years = Math.max(1, Math.min(40, parseInt(d.years, 10) || 1));
+    d.interestRate = Math.max(-50, Math.min(100, Number(d.interestRate) || 0));
+    d.monthlySaving = Number(d.monthlySaving) || 0;
+    d.startAmount = Number(d.startAmount) || 0;
+    const out = cur.id && this.db.get('forecasts', cur.id) ? this.db.update('forecasts', cur.id, d) : this.db.insert('forecasts', { ...d, id: undefined });
+    this.db.commit();
+    return out;
+  }
+
+  /**
+   * Month-by-month savings forecast. Interest is a yearly % added monthly. Purchases not yet bought and
+   * with a "when" month come out in that month (price + extras), and their running cost every month after.
+   * Returns {start, months:[{month, plain, withPlans}], years:[...], items:[{id, affordMonth}]}.
+   */
+  forecast(ws, settings = null, fromMonth = null) {
+    const s = settings || this.forecastSettings(ws);
+    const start = round2(s.useMoneyAtHand ? this.moneyAtHand(ws) : s.startAmount);
+    const n = Math.max(1, Math.min(40, s.years || 1)) * 12;
+    const r = (Number(s.interestRate) || 0) / 100 / 12;
+    const first = fromMonth || shiftMonth(monthKey(), 1);
+    const items = this.planItems(ws).filter((p) => p.status !== 'bought');
+    const dated = s.includePlans ? items.filter((p) => p.targetMonth) : [];
+    let plain = start, withPlans = start;
+    const months = [];
+    const yrs = [];
+    let yr = { saved: 0, interest: 0, spent: 0 };
+    for (let i = 0; i < n; i++) {
+      const m = shiftMonth(first, i);
+      const intPlain = plain * r;
+      const intPlans = withPlans * r;
+      let spent = 0;
+      for (const p of dated) {
+        if (p.targetMonth === m || (i === 0 && p.targetMonth < m)) spent += p.cost + p.extraCost;
+        if (p.targetMonth <= m) spent += p.monthlyCost;
+      }
+      plain += intPlain + (s.monthlySaving || 0);
+      withPlans += intPlans + (s.monthlySaving || 0) - spent;
+      yr.saved += s.monthlySaving || 0; yr.interest += s.includePlans ? intPlans : intPlain; yr.spent += spent;
+      months.push({ month: m, plain: round2(plain), withPlans: round2(withPlans) });
+      if ((i + 1) % 12 === 0) {
+        yrs.push({ year: (i + 1) / 12, month: m, saved: round2(yr.saved), interest: round2(yr.interest), spent: round2(yr.spent), balance: round2(s.includePlans ? withPlans : plain) });
+        yr = { saved: 0, interest: 0, spent: 0 };
+      }
+    }
+    // when could each purchase be paid for outright (on the plain forecast)?
+    const afford = {};
+    for (const p of items) {
+      const need = p.cost + p.extraCost;
+      afford[p.id] = need <= start ? 'now' : (months.find((x) => x.plain >= need)?.month || null);
+    }
+    return { start, months, years: yrs, afford, end: months[months.length - 1] };
   }
 
   // ================================================================= bills

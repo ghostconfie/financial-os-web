@@ -450,3 +450,55 @@ describe('Excel backup', () => {
     expect(sameData(before, s.snapshot())).toBe(true);
   });
 });
+
+describe('Plans & Forecast', () => {
+  it('forecasts savings with interest and planned purchases', () => {
+    setNow('2026-11-26T12:00:00Z');
+    const ws = wsId();
+    fin.saveForecastSettings(ws, { useMoneyAtHand: false, startAmount: 1000, monthlySaving: 100, interestRate: 0, years: 1, includePlans: true });
+    fin.savePlanItem(ws, { name: 'Car', cost: 500, extraCost: 100, monthlyCost: 50, status: 'saving', targetMonth: '2027-06' });
+    fin.savePlanItem(ws, { name: 'Undated', cost: 99999, status: 'idea' });
+    const f = fin.forecast(ws);
+    expect(f.months).toHaveLength(12);
+    expect(f.months[0].month).toBe('2026-12');
+    expect(f.end.plain).toBe(2200);
+    // Jun–Nov 2027: 6 months of £50 plus £600 once
+    expect(f.end.withPlans).toBe(2200 - 600 - 300);
+    expect(f.years[0].spent).toBe(900);
+    const car = fin.planItems(ws).find((p) => p.name === 'Car');
+    expect(f.afford[car.id]).toBe('now');
+    const big = fin.planItems(ws).find((p) => p.name === 'Undated');
+    expect(f.afford[big.id]).toBe(null);
+    // 12% a year = 1% a month on £1000, no saving
+    fin.saveForecastSettings(ws, { monthlySaving: 0, interestRate: 12, includePlans: false });
+    expect(fin.forecast(ws).months[0].plain).toBe(1010);
+    expect(fin.db.all('forecasts', { workspaceId: ws })).toHaveLength(1);
+  });
+
+  it('backs up and restores plans, notes and forecast', () => {
+    loadDemo(fin);
+    const ws = wsId();
+    fin.savePlanItem(ws, { name: 'Laptop', cost: 1200, monthlyCost: 9.99, status: 'idea', targetMonth: '2027-02', notes: 'Needs case\nand warranty' });
+    fin.savePlanNote(ws, { title: 'Holiday?', body: 'Spain or Italy' });
+    fin.saveForecastSettings(ws, { monthlySaving: 321, interestRate: 4.5, years: 10 });
+    const before = fin.db.snapshot();
+    const { data, problems } = readBackup(backupBytes(fin.db));
+    expect(problems).toEqual([]);
+    const s = new Store(); restoreBackup(s, data);
+    expect(sameData(before, s.snapshot())).toBe(true);
+  });
+
+  it('old backups without the new sheets still restore cleanly', () => {
+    const wb = XLSX.read(backupBytes(fin.db), { type: 'array' });
+    for (const n of ['Plans', 'Plan Notes', 'Forecast']) { delete wb.Sheets[n]; wb.SheetNames = wb.SheetNames.filter((x) => x !== n); }
+    const { problems } = readBackup(xlsxBuf(wb));
+    expect(problems).toEqual([]);
+  });
+
+  it('deleting a workspace removes its plans', () => {
+    const ws = wsId('Scrumbb');
+    fin.savePlanItem(ws, { name: 'Van', cost: 9000 });
+    fin.deleteWorkspace(ws);
+    expect(fin.db.all('plan_items')).toHaveLength(0);
+  });
+});

@@ -3,6 +3,7 @@ import { fmtMoney, monthKey } from '../lib/util.js';
 import { Ctx, Icon } from './components.jsx';
 import { Home } from './Home.jsx';
 import { TOUR_KEY, Tour } from './Tour.jsx';
+import { PlanItemDialog, PlanNoteDialog, Plans } from './Plans.jsx';
 import { Accounts, Analysis, Bills, Calendar, Categories, DLA, Transactions } from './Tools.jsx';
 import {
   AccountDialog, BillDialog, CategoryDialog, Confirm, CoverOverspend, DeleteAccount, DeletePool, GoalDialog,
@@ -26,13 +27,13 @@ const SettingsDialog = lazy(() => import('./BackupDialogs.jsx'), 'SettingsDialog
 const DIALOGS = {
   quick: QuickAdd, pool: PoolDialog, push: PushFunds, deletePool: DeletePool, cover: CoverOverspend, category: CategoryDialog,
   remap: RemapDialog, bill: BillDialog, goal: GoalDialog, account: AccountDialog, deleteAccount: DeleteAccount,
-  workspaces: WorkspaceDialog, confirm: Confirm, tour: Tour, import: ImportDialog, backup: BackupDialog, restore: RestoreDialog, settings: SettingsDialog,
+  workspaces: WorkspaceDialog, confirm: Confirm, tour: Tour, planItem: PlanItemDialog, planNote: PlanNoteDialog, import: ImportDialog, backup: BackupDialog, restore: RestoreDialog, settings: SettingsDialog,
 };
 const TABS = [
   ['home', 'Budget Pools', '◎'], ['accounts', 'Accounts', '🏦'], ['tx', 'Transactions', '≡'], ['calendar', 'Calendar & P&L', '▦'],
-  ['categories', 'Categories', '◆'], ['bills', 'Bills', '🧾'], ['dla', "Director's Loan", '💼'], ['analysis', 'Analysis', '📊'],
+  ['categories', 'Categories', '◆'], ['bills', 'Bills', '🧾'], ['dla', "Director's Loan", '💼'], ['analysis', 'Analysis', '📊'], ['plans', 'Plans & Forecast', '🔮'],
 ];
-const VIEWS = { home: Home, accounts: Accounts, tx: Transactions, calendar: Calendar, categories: Categories, bills: Bills, dla: DLA, analysis: Analysis };
+const VIEWS = { home: Home, accounts: Accounts, tx: Transactions, calendar: Calendar, categories: Categories, bills: Bills, dla: DLA, analysis: Analysis, plans: Plans };
 const BOTTOM = ['home', 'tx', 'bills'];
 const NAV_ICON = { home: 'home', tx: 'list', bills: 'bill' };
 
