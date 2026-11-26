@@ -124,7 +124,39 @@ const SHEETS = [
     ['Monthly Target', 'money', (r) => r.amount, 'amount'],
     ['Type', 'text', (r) => r.type, 'type'],
   ]],
+  ['Plans', 'plan_items', [
+    ['ID', 'text', (r) => r.id, 'id'],
+    ['Workspace', 'text', (r, c) => c.wsName(r.workspaceId), 'workspace'],
+    ['What', 'text', (r) => r.name, 'name'],
+    ['Price', 'money', (r) => r.cost, 'cost'],
+    ['Extra One-off Costs', 'money', (r) => r.extraCost, 'extraCost'],
+    ['Ongoing Cost per Month', 'money', (r) => r.monthlyCost, 'monthlyCost'],
+    ['Status', 'text', (r) => STATUS_LABEL[r.status] || 'Idea', 'status'],
+    ['When (YYYY-MM)', 'text', (r) => r.targetMonth, 'targetMonth'],
+    ['Notes', 'text', (r) => r.notes, 'notes'],
+    ['Created', 'text', (r) => r.createdAt, 'createdAt'],
+  ]],
+  ['Plan Notes', 'plan_notes', [
+    ['ID', 'text', (r) => r.id, 'id'],
+    ['Workspace', 'text', (r, c) => c.wsName(r.workspaceId), 'workspace'],
+    ['Title', 'text', (r) => r.title, 'title'],
+    ['Note', 'text', (r) => r.body, 'body'],
+    ['Created', 'text', (r) => r.createdAt, 'createdAt'],
+  ]],
+  ['Forecast', 'forecasts', [
+    ['ID', 'text', (r) => r.id, 'id'],
+    ['Workspace', 'text', (r, c) => c.wsName(r.workspaceId), 'workspace'],
+    ['Start From Money at Hand', 'bool', (r) => r.useMoneyAtHand, 'useMoneyAtHand'],
+    ['Starting Amount', 'money', (r) => r.startAmount, 'startAmount'],
+    ['Saving per Month', 'money', (r) => r.monthlySaving, 'monthlySaving'],
+    ['Interest % a Year', 'num', (r) => r.interestRate, 'interestRate'],
+    ['Years', 'int', (r) => r.years, 'years'],
+    ['Take Off Planned Purchases', 'bool', (r) => r.includePlans, 'includePlans'],
+  ]],
 ];
+// sheets added later: older backups don't have them, and that's fine
+const OPTIONAL_SHEETS = new Set(['Plans', 'Plan Notes', 'Forecast']);
+const STATUS_LABEL = { idea: 'Idea', saving: 'Saving up', bought: 'Bought' };
 
 const ORDER_SORT = {
   workspaces: (a, b) => a.order - b.order,
@@ -182,7 +214,7 @@ export function buildBackup(store) {
     ['Saved', nowIso()],
     [],
     ['What this file is'],
-    ['A complete copy of everything in Emperio Finances: every workspace, account, transaction, transfer, category, pool, bill and goal.'],
+    ['A complete copy of everything in Emperio Finances: every workspace, account, transaction, transfer, category, pool, bill, goal, plan, note and forecast.'],
     ['To restore: open Emperio Finances, choose Menu → Restore from Excel backup, and pick this file.'],
     ['You can edit it in Excel. Keep the sheet names and the header row. Leave ID blank for new rows.'],
     ['Workspace, Pool and Account columns use names, so they must match the names on the other sheets.'],
@@ -210,7 +242,7 @@ export function isBackup(buf) {
   try {
     const wb = XLSX.read(buf, { type: 'array', sheetRows: 2 });
     const a = wb.Sheets.About;
-    return !!(a && a.A1 && [BACKUP_MARK, ...OLD_MARKS].includes(String(a.A1.v).trim())) || SHEETS.every(([n]) => wb.SheetNames.includes(n));
+    return !!(a && a.A1 && [BACKUP_MARK, ...OLD_MARKS].includes(String(a.A1.v).trim())) || SHEETS.every(([n]) => OPTIONAL_SHEETS.has(n) || wb.SheetNames.includes(n));
   } catch {
     return false;
   }
@@ -243,7 +275,7 @@ export function readBackup(buf) {
   const rawBy = {};
   for (const [name, table, cols] of SHEETS) {
     const sh = wb.Sheets[name];
-    if (!sh || !sh['!ref']) { rawBy[table] = []; if (!sh) problems.push(`Sheet “${name}” is missing, so it was treated as empty.`); continue; }
+    if (!sh || !sh['!ref']) { rawBy[table] = []; if (!sh && !OPTIONAL_SHEETS.has(name)) problems.push(`Sheet “${name}” is missing, so it was treated as empty.`); continue; }
     const range = XLSX.utils.decode_range(sh['!ref']);
     const header = [];
     for (let c = 0; c <= range.e.c; c++) header.push(String(cellToValue(sh[XLSX.utils.encode_cell({ r: 0, c })])).trim().toLowerCase());
@@ -382,6 +414,32 @@ export function readBackup(buf) {
       type: TX_TYPES.includes(r.type) ? r.type : 'Expense',
     });
   }
+  for (const r of rawBy.plan_items) {
+    const w = wsId(r.workspace, 'Plans', r._row);
+    if (!w || !r.name) continue;
+    const st = (r.status || '').toLowerCase();
+    const tm = String(r.targetMonth || '').match(/^(\d{4})-(\d{1,2})/);
+    out.plan_items.push({
+      id: r.id || newId(), workspaceId: w, name: r.name, cost: Math.abs(r.cost), extraCost: Math.abs(r.extraCost),
+      monthlyCost: Math.abs(r.monthlyCost), status: st.startsWith('bought') ? 'bought' : st.startsWith('sav') ? 'saving' : 'idea',
+      targetMonth: tm ? `${tm[1]}-${tm[2].padStart(2, '0')}` : null, notes: r.notes, createdAt: r.createdAt || undefined,
+    });
+  }
+  for (const r of rawBy.plan_notes) {
+    const w = wsId(r.workspace, 'Plan Notes', r._row);
+    if (!w || (!r.title && !r.body)) continue;
+    out.plan_notes.push({ id: r.id || newId(), workspaceId: w, title: r.title, body: r.body, createdAt: r.createdAt || undefined });
+  }
+  const fcSeen = new Set();
+  for (const r of rawBy.forecasts) {
+    const w = wsId(r.workspace, 'Forecast', r._row);
+    if (!w || fcSeen.has(w)) continue;
+    fcSeen.add(w);
+    out.forecasts.push({
+      id: r.id || newId(), workspaceId: w, useMoneyAtHand: r.useMoneyAtHand, startAmount: r.startAmount, monthlySaving: r.monthlySaving,
+      interestRate: r.interestRate, years: Math.max(1, Math.min(40, r.years || 5)), includePlans: r.includePlans,
+    });
+  }
   // every workspace needs a pool and a default
   for (const w of out.workspaces) {
     const ps = out.budget_pools.filter((p) => p.workspaceId === w.id);
@@ -409,7 +467,7 @@ export function sameData(a, b) {
   const strip = (t, r) => {
     const c = { ...r };
     delete c.updatedAt;
-    if (t !== 'transactions' && t !== 'transfers' && t !== 'pool_transfers') delete c.createdAt;
+    if (!['transactions', 'transfers', 'pool_transfers', 'plan_items', 'plan_notes'].includes(t)) delete c.createdAt;
     for (const k of Object.keys(SCHEMA[t])) if (typeof c[k] === 'number') c[k] = round2(c[k]);
     return JSON.stringify(c, Object.keys(c).sort());
   };

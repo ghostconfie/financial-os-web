@@ -36,6 +36,16 @@ export const SCHEMA = {
     createdAt: 'TEXT', updatedAt: 'TEXT',
   },
   budget_goals: { id: 'TEXT', workspaceId: 'TEXT', category: 'TEXT', amount: 'REAL', type: 'TEXT', createdAt: 'TEXT', updatedAt: 'TEXT' },
+  // Plans & Forecast: things you might buy, what they cost to keep, and how savings could grow.
+  plan_items: {
+    id: 'TEXT', workspaceId: 'TEXT', name: 'TEXT', cost: 'REAL', extraCost: 'REAL', monthlyCost: 'REAL', status: 'TEXT',
+    targetMonth: 'TEXT', notes: 'TEXT', createdAt: 'TEXT', updatedAt: 'TEXT',
+  },
+  plan_notes: { id: 'TEXT', workspaceId: 'TEXT', title: 'TEXT', body: 'TEXT', createdAt: 'TEXT', updatedAt: 'TEXT' },
+  forecasts: {
+    id: 'TEXT', workspaceId: 'TEXT', startAmount: 'REAL', useMoneyAtHand: 'BOOL', monthlySaving: 'REAL', interestRate: 'REAL',
+    years: 'INT', includePlans: 'BOOL', createdAt: 'TEXT', updatedAt: 'TEXT',
+  },
 };
 export const TABLES = Object.keys(SCHEMA);
 

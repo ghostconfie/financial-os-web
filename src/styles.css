@@ -415,3 +415,16 @@ input[type=file]::file-selector-button { font: inherit; font-weight: 700; border
 .brandname { font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif; font-weight: 600; letter-spacing: .01em; font-size: 26px; }
 .login-brand { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; margin-bottom: 6px; }
 .login-brand img { border-radius: 18px; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); margin-bottom: 4px; }
+
+/* Plans & Forecast */
+.fc-inputs { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); align-items: end; }
+.fc-inputs > .field:first-child { grid-column: span 2; }
+.fc-inputs .seg { flex-wrap: wrap; }
+.fc-axis { display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; }
+.legend-line { display: inline-block; width: 18px; height: 0; border-top: 3px solid var(--chart); border-radius: 2px; }
+.legend-line.dashed { border-top: 2px dashed var(--muted); }
+.plan-costs { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); }
+.plan-costs b { color: var(--text); }
+.plans-grid { align-items: start; }
+@media (max-width: 720px) { .fc-inputs { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .fc-inputs > .field:first-child { grid-column: 1 / -1; } }
+@media (max-width: 720px) { .plans-grid { grid-template-columns: minmax(0, 1fr); } .fc-axis span:nth-child(even):not(:last-child) { display: none; } }
