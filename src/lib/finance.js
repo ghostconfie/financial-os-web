@@ -178,7 +178,11 @@ export class Finance {
     });
   }
 
-  moneyAtHand(ws) { return round2(this.accountSummaries(ws).reduce((s, a) => s + a.balance, 0)); }
+  /** Money at hand counts only what you actually have: accounts below £0 don't reduce it. */
+  moneyAtHand(ws) { return round2(this.accountSummaries(ws).reduce((s, a) => s + Math.max(0, a.balance), 0)); }
+
+  /** What's owed on overdrawn accounts (shown as a positive number, kept separate from money at hand). */
+  owed(ws) { return round2(this.accountSummaries(ws).reduce((s, a) => s + Math.max(0, -a.balance), 0)); }
 
   // ========================================================== transactions
   transactions(ws, f = {}) {
@@ -492,7 +496,7 @@ export class Finance {
     const toAssign = round2(mah - inPools);
     const toFill = conn.filter((m) => !m.filledThisMonth && m.monthly > 0);
     return {
-      moneyAtHand: mah, inPools, toAssign, assigned: inPools, unpooled: toAssign,
+      moneyAtHand: mah, owed: this.owed(ws), inPools, toAssign, assigned: inPools, unpooled: toAssign,
       standalone: round2(metrics.filter((m) => !m.isWorkspaceConnected).reduce((s, m) => s + m.available, 0)),
       fillNeeded: round2(toFill.reduce((s, m) => s + m.monthly, 0)), fillCount: toFill.length,
       overspent: metrics.filter((m) => m.available < -0.004),
@@ -911,22 +915,27 @@ export class Finance {
     return out;
   }
 
-  /** Total money at hand at the end of each of the last `days` days. */
+  /** Total money at hand at the end of each of the last `days` days (overdrawn accounts count as £0). */
   balanceSeries(ws, days = 30) {
     const end = todayStr();
     const start = addDays(end, -(days - 1));
-    let bal = this.accounts(ws).reduce((s, a) => s + a.initialBalance, 0);
+    const bal = Object.fromEntries(this.accounts(ws).map((a) => [a.name, a.initialBalance]));
     const deltas = {};
-    for (const t of this.db.raw('transactions')) {
+    const add = (date, acc, amt) => {
+      if (date < start) bal[acc] = (bal[acc] || 0) + amt;
+      else ((deltas[date] ||= {})[acc] = (deltas[date][acc] || 0) + amt);
+    };
+    for (const t of this.db.raw('transactions')) if (t.workspaceId === ws) add(t.date, t.bankAccount, t.amount);
+    for (const t of this.db.raw('transfers')) {
       if (t.workspaceId !== ws) continue;
-      if (t.date < start) bal += t.amount;
-      else deltas[t.date] = (deltas[t.date] || 0) + t.amount;
+      add(t.date, t.fromAccount, -t.amount);
+      add(t.date, t.toAccount, t.amount);
     }
     const out = [];
     for (let i = 0; i < days; i++) {
       const d = addDays(start, i);
-      bal += deltas[d] || 0;
-      out.push([d, round2(bal)]);
+      for (const [acc, amt] of Object.entries(deltas[d] || {})) bal[acc] = (bal[acc] || 0) + amt;
+      out.push([d, round2(Object.values(bal).reduce((s, v) => s + Math.max(0, v), 0))]);
     }
     return out;
   }

@@ -46,6 +46,19 @@ describe('money rules (same as desktop)', () => {
     expect(fin.moneyAtHand(ws)).toBeCloseTo(1060);
   });
 
+  it('overdrawn accounts do not reduce money at hand', () => {
+    const ws = wsId();
+    fin.saveAccount(ws, 'Credit Card', 0);
+    fin.saveTransaction({ workspaceId: ws, date: '2026-11-01', type: 'Income', category: 'Salary', bankAccount: 'Current Account', amount: 500 });
+    fin.saveTransaction({ workspaceId: ws, date: '2026-11-02', type: 'Expense', category: 'Groceries', bankAccount: 'Credit Card', amount: 120 });
+    expect(fin.moneyAtHand(ws)).toBe(500);
+    expect(fin.owed(ws)).toBe(120);
+    const h = fin.header(ws, '2026-11');
+    expect(h.moneyAtHand).toBe(500);
+    expect(h.owed).toBe(120);
+    expect(round(h.inPools + h.toAssign)).toBe(500);
+  });
+
   it('zero-based: every pound of money at hand gets assigned to a pool', () => {
     const ws = wsId();
     fin.saveAccount(ws, 'Current Account', 5000, fin.accounts(ws)[0].id);

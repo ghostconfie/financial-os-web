@@ -8,14 +8,15 @@ import { Avatar, Bar, Empty, Icon, Money, Pill, Seg, Select, Stat, TxRow, useApp
 export function Accounts() {
   const { fin, ws, open, go, version } = useApp();
   const accs = useMemo(() => fin.accountSummaries(ws), [version, ws]);
-  const total = accs.reduce((s, a) => s + a.balance, 0);
+  const total = fin.moneyAtHand(ws);
+  const owed = fin.owed(ws);
   const transfers = fin.transfers(ws);
   const [showAll, setShowAll] = useState(false);
   return (
     <div>
       <div class="page-head">
         <h1 class="grow">Bank Accounts</h1>
-        <span class="muted">Money at hand <Money v={total} class="" /></span>
+        <span class="muted">Money at hand <Money v={total} class="" />{owed > 0.004 && <> · Overdrawn (not counted) <Money v={-owed} class="neg" /></>}</span>
         <button class="btn primary" onClick={() => open('account', {})}>+ Add account</button>
       </div>
       <div class="grid c3">
