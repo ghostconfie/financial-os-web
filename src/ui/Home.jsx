@@ -262,6 +262,7 @@ export function Home() {
             <div class="kpis">
               <div><div class="k">In pools</div><div class="v">{fmtMoney(head.inPools)}</div></div>
               <div><div class="k">Left to assign</div><div class={`v ${Math.abs(head.toAssign) > 0.004 ? 'warn' : ''}`}>{fmtMoney(head.toAssign)}</div></div>
+              {head.owed > 0.004 && <div><div class="k">Overdrawn (not counted)</div><div class="v warn">{fmtMoney(-head.owed)}</div></div>}
               {Math.abs(head.standalone) > 0.004 && <div><div class="k">Standalone</div><div class="v">{fmtMoney(head.standalone)}</div></div>}
             </div>
           </div>

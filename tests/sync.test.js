@@ -90,7 +90,8 @@ describe('cloud sync', () => {
     const t = fa.saveTransaction({ workspaceId: ws, date: '2026-11-20', type: 'Expense', category: 'Groceries', bankAccount: 'Current Account', amount: 12.5, description: 'Tesco' });
     await flush();
     expect(fb.transactions(ws).map((x) => [x.description, x.amount])).toEqual([['Tesco', -12.5]]);
-    expect(fb.moneyAtHand(ws)).toBe(-12.5);
+    expect(fb.moneyAtHand(ws)).toBe(0);
+    expect(fb.owed(ws)).toBe(12.5);
 
     // B edits, A sees it
     fb.saveTransaction({ ...fb.transactions(ws)[0], amount: 20, type: 'Expense' });
