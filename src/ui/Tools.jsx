@@ -22,7 +22,7 @@ export function Accounts() {
       <div class="grid c3">
         {accs.map((a) => (
           <div class="card" key={a.id}>
-            <div class="row"><Avatar name={a.name} color="#151815" /><b class="grow">{a.name}</b>{a.balance < 0 && <Pill tone="rose">Overdrawn</Pill>}</div>
+            <div class="row"><Avatar name={a.name} color="#7c5cff" /><b class="grow">{a.name}</b>{a.balance < 0 && <Pill tone="rose">Overdrawn</Pill>}</div>
             <div class="eyebrow" style={{ marginTop: 8 }}>Current balance</div>
             <div class={`money ${a.balance < 0 ? 'neg' : ''}`} style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-.03em' }}>{fmtMoney(a.balance)}</div>
             <div class="col small" style={{ margin: '8px 0', gap: 2 }}>
@@ -354,7 +354,7 @@ export function Bills() {
           return (
             <div class="mitem" key={b.id}>
               <div class="top">
-                <Avatar name={b.billName} color={st.paid ? '#13a150' : '#151815'} />
+                <Avatar name={b.billName} color={st.paid ? '#13a150' : '#7c5cff'} />
                 <div class="grow"><div class="name">{b.billName}</div><div class="small muted">Due {st.dueLabel} · {b.bankAccount}</div></div>
                 <div class="col" style={{ alignItems: 'flex-end' }}><Money v={b.amount} class="big" /><Pill tone={st.tone === 'neutral' ? '' : st.tone}>{st.status}</Pill></div>
               </div>

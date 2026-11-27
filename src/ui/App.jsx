@@ -45,7 +45,7 @@ const ls = {
 function applyTheme(t) {
   const dark = t === 'dark' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0c1511' : '#d4ece2');
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#111016' : '#f4f3f8');
 }
 
 export function App({ fin, sync: initialSync, onStatus }) {
