@@ -21,7 +21,7 @@ export default defineConfig({
         scope: './',
         display: 'standalone',
         background_color: '#0d0d0d',
-        theme_color: '#d4ece2',
+        theme_color: '#f4f3f8',
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },

@@ -236,7 +236,7 @@ export function Icon({ name, size }) {
 /** Round coloured circle with the first letter of a name (stands in for a logo). */
 export function Avatar({ name, color, small }) {
   const ch = (String(name || '?').trim().match(/[A-Za-z0-9]/) || ['£'])[0].toUpperCase();
-  return <span class={`avatar ${small ? 'sm' : ''}`} style={{ background: color || '#6b7280' }}>{ch}</span>;
+  return <span class={`avatar ${small ? 'sm' : ''}`} style={{ '--av': color || '#6b7280' }}>{ch}</span>;
 }
 
 /** A transaction as a rounded row: avatar, description, details and a green/red amount. */
